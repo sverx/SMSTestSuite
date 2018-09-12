@@ -4,7 +4,7 @@
 ************************************************************************ */
 
 #define MAJOR_VER 0
-#define MINOR_VER 23
+#define MINOR_VER 24
 
 #include <stdio.h>
 #include <stdbool.h>
@@ -22,12 +22,13 @@ const unsigned char *main_menu[MAIN_MENU_ITEMS] =   {"Video Tests",
                                                      "Pad Tests",
                                                      "System Info"};
 
-#define VIDEO_MENU_ITEMS 9
+#define VIDEO_MENU_ITEMS 10
 const unsigned char *video_menu[VIDEO_MENU_ITEMS] = {"PLUGE",
                                                      "Color bars",
                                                      "Color bleed",
                                                      "Grid",
                                                      "Stripes/Checks",
+                                                     "Full colors",
                                                      "Linearity",
                                                      "Drop Shadow",
                                                      "Striped sprite",
@@ -319,15 +320,13 @@ void draw_footer_and_ver (void) {
   SMS_setNextTileatXY(FOOTER_COL,FOOTER_ROW+1);
   printf (" Region:");
   if (is_Japanese)
-     printf ("JPN");                    // Japanese
+    printf ("JPN");                 // Japanese
+  else if (TV_model & VDP_NTSC)
+    printf ("USA");                 // not Japanese and 60 Hz
+  else if (TV_model & VDP_PAL)
+    printf ("EUR");                 // not Japanese and 50 Hz
   else
-    if (TV_model & VDP_NTSC)
-      printf ("USA");                   // not Japanese and 60 Hz
-    else
-      if (TV_model & VDP_PAL)
-        printf ("EUR");                 // not Japanese and 50 Hz
-      else
-        printf ("???");                 // not Japanese and undetected TV (?)
+    printf ("???");                 // not Japanese and undetected TV (this shouldn't happen with current detection routine)
 
   // print TV mode
   printf (" TV:");
@@ -451,6 +450,33 @@ void drop_shadow_striped_sprite (bool striped) {
   SMS_setSpriteMode(SPRITEMODE_NORMAL);
 }
 
+void fullscreen (void) {
+  unsigned char which=0;
+  SMS_displayOff();
+  SMS_VRAMmemset (0x0000, 0x00, 32);               // a 'empty' tile
+  SMS_VRAMmemset (XYtoADDR(0,0), 0x00, 32*28*2);  // full map of 'empty' tiles
+  SMS_setBGPaletteColor (0, RGB(3,3,3));
+  SMS_displayOn();
+  for (;;) {
+    SMS_initSprites();
+    SMS_waitForVBlank();
+    SMS_copySpritestoSAT();
+    kp=SMS_getKeysPressed();
+    if (kp & (PORT_A_KEY_2|PORT_B_KEY_2))
+      break;
+    if (kp & (PORT_A_KEY_1|PORT_B_KEY_1)) {
+      which=(which+1)%4;
+      switch (which) {
+        case 0:SMS_setBGPaletteColor (0, RGB(3,3,3)); break;
+        case 1:SMS_setBGPaletteColor (0, RGB(3,0,0)); break;
+        case 2:SMS_setBGPaletteColor (0, RGB(0,3,0)); break;
+        case 3:SMS_setBGPaletteColor (0, RGB(0,0,3)); break;
+      }
+    }
+  }
+  SMS_displayOff();
+}
+
 void video_tests (void) {
   bool go_back=false;
   draw_menu(video_menu, VIDEO_MENU_ITEMS);
@@ -487,15 +513,16 @@ void video_tests (void) {
         case 2:static_screen(color_bleed__tiles__psgcompr,color_bleed__tilemap__stmcompr,color_bars__palette__bin,color_bleed2__tiles__psgcompr); break;
         case 3:static_screen(grid__tiles__psgcompr,grid__tilemap__stmcompr,grid__palette__bin,NULL); break;
         case 4:static_screen(stripes__tiles__psgcompr,fullscreen__tilemap__stmcompr,bw_palette_bin,checkerboard__tiles__psgcompr); break;
-        case 5:if ((!(SMS_getKeysStatus() & CARTRIDGE_SLOT)) && (port_0==0xFF))  // if it's a GameGear
+        case 5:fullscreen(); break;
+        case 6:if ((!(SMS_getKeysStatus() & CARTRIDGE_SLOT)) && (port_0==0xFF))  // if it's a GameGear
                  static_screen(linearity_GG__tiles__psgcompr,linearity_GG__tilemap__stmcompr,linearity__palette__bin,NULL);
                else if (TV_model & VDP_PAL)
                  static_screen(linearity_PAL__tiles__psgcompr,linearity_PAL__tilemap__stmcompr,linearity__palette__bin,NULL);
                else
                  static_screen(linearity_NTSC__tiles__psgcompr,linearity_NTSC__tilemap__stmcompr,linearity__palette__bin,NULL);
                break;
-        case 6:drop_shadow_striped_sprite(false);break;
-        case 7:drop_shadow_striped_sprite(true);break;
+        case 7:drop_shadow_striped_sprite(false);break;
+        case 8:drop_shadow_striped_sprite(true);break;
         case VIDEO_MENU_ITEMS-1:go_back=true; break;
       }
       if (!go_back) {
@@ -667,12 +694,11 @@ void sysinfo (void) {
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+3);
   printf (" TV? :");
   if (TV_model & VDP_NTSC)
-    printf ("60Hz(NTSC)");                   // 60 Hz
+    printf ("60Hz(NTSC)");               // 60 Hz
+  else if (TV_model & VDP_PAL)
+    printf ("50Hz(PAL) ");               // 50 Hz
   else
-    if (TV_model & VDP_PAL)
-      printf ("50Hz(PAL) ");                 // 50 Hz
-    else
-      printf ("*???*    ");                 // undetected TV (?)
+    printf ("*???*     ");               // undetected TV (?)
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+4);
   printf (" port $00: 0x%02X   ",port_0);
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+5);
