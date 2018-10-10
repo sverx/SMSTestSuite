@@ -4,7 +4,7 @@
 ************************************************************************ */
 
 #define MAJOR_VER 0
-#define MINOR_VER 24
+#define MINOR_VER 25
 
 #include <stdio.h>
 #include <stdbool.h>
@@ -68,8 +68,8 @@ unsigned char pointer_anim;
 
 
 /* hardware tests results */
-unsigned char TV_model,port_0;
-bool has_new_VDP,is_Japanese;
+unsigned char TV_model;
+bool has_new_VDP,is_Japanese,is_GG;
 
 /*  ****************** for PADS TESTS *********************** */
 
@@ -101,6 +101,9 @@ bool has_new_VDP,is_Japanese;
 
 #define CODE_IN_RAM_SIZE  256
 #define TEMP_BUF_SIZE     (4*1024)
+
+#define CART_CHECK_ADDR   0x7F00
+#define CART_CHECK_SIZE   256
 
 unsigned char pause_cnt;
 unsigned int kp,kr,mp,mr,ks;
@@ -134,7 +137,8 @@ nocarry:
     jr nz,loop
     ex de,hl         ; hl=sum
 
-    ld a,#0b10101011 ; reset bits 4,6 (enable RAM/cartridge) and set bits 3,5,7 (to disable BIOS/card/expansion)
+    ; ld a,#0b10101011 ; reset bits 4,6 (enable RAM/cartridge) and set bits 3,5,7 (to disable BIOS/card/expansion)
+    ld a,(_SMS_Port3FBIOSvalue)    
     out (#0x3E),a    ; restore it
 
     ei               ; re-enable interrupts!
@@ -152,7 +156,6 @@ unsigned int get_BIOS_sum (void) __naked {
     jp _code_in_RAM
   __endasm;
 }
-
 
 void ldir_BIOS_SRAM (void) __naked {
   /* *************************
@@ -177,7 +180,8 @@ outloop1:
         ld bc,#TEMP_BUF_SIZE     ; 4K
         ldir
 
-        ld a,#0b10101011  ; reset bits 4,6 (enable RAM/cartridge) and set bits 3,5,7 (to disable BIOS/card/expansion)
+        ; ld a,#0b10101011  ; reset bits 4,6 (enable RAM/cartridge) and set bits 3,5,7 (to disable BIOS/card/expansion)
+        ld a,(_SMS_Port3FBIOSvalue)
         out (#0x3E),a     ; restore it
       pop de
       push hl
@@ -190,7 +194,7 @@ outloop1:
     djnz outloop1
 
 /* *************************************
-    
+
     // ---> My Master EverDrive is the old model
     //      and doesn't seem to support 32 KB saves :(
 
@@ -224,7 +228,7 @@ outloop2:
 
     pop bc
     djnz outloop2
-    
+
  *************************************  */
 
     ei               ; re-enable interrupts!
@@ -236,6 +240,56 @@ outloop2:
 void dump_BIOS (void) __naked {
   __asm
     ld hl,#_ldir_BIOS_SRAM
+    ld de,#_code_in_RAM
+    ld bc,#CODE_IN_RAM_SIZE
+    ldir                           ; copy code in RAM
+    jp _code_in_RAM
+  __endasm;
+}
+
+unsigned char detect_GG (void)  __naked {
+  /* *************************
+     NOTE: this code will be copied to RAM and run from there!
+     *************************  */
+  __asm
+    di               ; interrupts should be disabled!
+
+    ld a,(_SMS_Port3FBIOSvalue)
+    or #0xE0         ; set bits 5,6,7 (to disable card/cartridge/expansion)
+    out (#0x3E),a    ; do! (should have NO effect on a GameGear)
+
+    ld hl,#CART_CHECK_ADDR
+    ld de,#_temp_buf
+    ld b,#CART_CHECK_SIZE
+match_loop:
+    ld a,(de)
+    cp (hl)
+    jr nz,no_match   ; check if I can still read from card/cartridge/expansion
+    inc hl
+    inc de
+    djnz match_loop
+    ld l,#1          ; I can: it is a GameGear
+    jr cont
+
+no_match:
+    ld l,#0          ; I failed: it is a Master System
+
+cont:
+    ld a,(_SMS_Port3FBIOSvalue)
+    out (#0x3E),a    ; restore port 0x3E
+    ei               ; re-enable interrupts!
+
+    ret              ; because I am naked ;)
+  __endasm;
+}
+
+bool is_GameGear (void) __naked {
+  __asm
+    ld hl,#CART_CHECK_ADDR
+    ld de,#_temp_buf
+    ld bc,#CART_CHECK_SIZE
+    ldir                           ; copy some bytes from card/cartridge/expansion to RAM
+    ld hl,#_detect_GG
     ld de,#_code_in_RAM
     ld bc,#CODE_IN_RAM_SIZE
     ldir                           ; copy code in RAM
@@ -277,6 +331,7 @@ _IsJap:
   __endasm;
 }
 
+/*
 unsigned char port0 (void) __naked {
   __asm
     in a,(#0)
@@ -284,6 +339,7 @@ unsigned char port0 (void) __naked {
     ret
   __endasm;
 }
+*/
 
 bool newVDP (void) {
   unsigned char i;
@@ -309,7 +365,7 @@ void draw_footer_and_ver (void) {
   printf (" Model:");
   if (SMS_getKeysStatus() & CARTRIDGE_SLOT)
     printf ("Genesis/MegaDrive  ");
-  else if (port_0==0xFF)
+  else if (is_GG)
     printf ("Game Gear          ");
   else if (has_new_VDP)
     printf ("Master System II   ");
@@ -514,7 +570,7 @@ void video_tests (void) {
         case 3:static_screen(grid__tiles__psgcompr,grid__tilemap__stmcompr,grid__palette__bin,NULL); break;
         case 4:static_screen(stripes__tiles__psgcompr,fullscreen__tilemap__stmcompr,bw_palette_bin,checkerboard__tiles__psgcompr); break;
         case 5:fullscreen(); break;
-        case 6:if ((!(SMS_getKeysStatus() & CARTRIDGE_SLOT)) && (port_0==0xFF))  // if it's a GameGear
+        case 6:if ((!(SMS_getKeysStatus() & CARTRIDGE_SLOT)) && (is_GG))  // if it's a GameGear
                  static_screen(linearity_GG__tiles__psgcompr,linearity_GG__tilemap__stmcompr,linearity__palette__bin,NULL);
                else if (TV_model & VDP_PAL)
                  static_screen(linearity_PAL__tiles__psgcompr,linearity_PAL__tilemap__stmcompr,linearity__palette__bin,NULL);
@@ -700,9 +756,9 @@ void sysinfo (void) {
   else
     printf ("*???*     ");               // undetected TV (?)
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+4);
-  printf (" port $00: 0x%02X   ",port_0);
+  printf (" GameGear?:%-3s    ",(is_GG?"Yes":"No"));
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+5);
-  if ((!(SMS_getKeysStatus() & CARTRIDGE_SLOT)) && (port_0!=0xFF)) {        // if not MegaDrive and not GameGear
+  if ((!(SMS_getKeysStatus() & CARTRIDGE_SLOT)) && (!is_GG)) {        // if not MegaDrive and not GameGear
     sum8k=get_BIOS_sum();
     printf (" BIOS sum: 0x%04X ",sum8k);
     SMS_setNextTileatXY(1,20);
@@ -740,7 +796,8 @@ void main (void) {
   is_Japanese=isJapanese();
 
   // detect TV and console type using various means
-  port_0=port0();
+  // port_0=port0();
+  is_GG=is_GameGear();
   SMS_displayOn();
   TV_model=SMS_VDPType();
   has_new_VDP=newVDP();
