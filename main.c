@@ -1,10 +1,10 @@
 /* *********************************************************************
       SMS Test Suite - by sverx
-        ("largely inspired by Artemio's 240p, but not a fork of it!")
+           ("largely inspired by Artemio's 240p, but not a fork of it!")
 ************************************************************************ */
 
 #define MAJOR_VER 0
-#define MINOR_VER 25
+#define MINOR_VER 28
 
 #include <stdio.h>
 #include <stdbool.h>
@@ -69,7 +69,12 @@ unsigned char pointer_anim;
 
 /* hardware tests results */
 unsigned char TV_model;
-bool has_new_VDP,is_Japanese,is_GG;
+bool is_MegaDrive,has_new_VDP,is_Japanese,do_Port3E_works;
+
+/* VDP sprite zoom capabilities */
+#define SZC_ABSENT   0
+#define SZC_PARTIAL  1
+#define SZC_COMPLETE 2
 
 /*  ****************** for PADS TESTS *********************** */
 
@@ -138,7 +143,7 @@ nocarry:
     ex de,hl         ; hl=sum
 
     ; ld a,#0b10101011 ; reset bits 4,6 (enable RAM/cartridge) and set bits 3,5,7 (to disable BIOS/card/expansion)
-    ld a,(_SMS_Port3FBIOSvalue)    
+    ld a,(_SMS_Port3EBIOSvalue)    
     out (#0x3E),a    ; restore it
 
     ei               ; re-enable interrupts!
@@ -181,7 +186,7 @@ outloop1:
         ldir
 
         ; ld a,#0b10101011  ; reset bits 4,6 (enable RAM/cartridge) and set bits 3,5,7 (to disable BIOS/card/expansion)
-        ld a,(_SMS_Port3FBIOSvalue)
+        ld a,(_SMS_Port3EBIOSvalue)
         out (#0x3E),a     ; restore it
       pop de
       push hl
@@ -247,16 +252,16 @@ void dump_BIOS (void) __naked {
   __endasm;
 }
 
-unsigned char detect_GG (void)  __naked {
+unsigned char detect_Port3E_effectiveness (void)  __naked {
   /* *************************
      NOTE: this code will be copied to RAM and run from there!
      *************************  */
   __asm
     di               ; interrupts should be disabled!
 
-    ld a,(_SMS_Port3FBIOSvalue)
+    ld a,(_SMS_Port3EBIOSvalue)
     or #0xE0         ; set bits 5,6,7 (to disable card/cartridge/expansion)
-    out (#0x3E),a    ; do! (should have NO effect on a GameGear)
+    out (#0x3E),a    ; do! (should have NO effect on a GameGear and on a Mark III)
 
     ld hl,#CART_CHECK_ADDR
     ld de,#_temp_buf
@@ -268,14 +273,14 @@ match_loop:
     inc hl
     inc de
     djnz match_loop
-    ld l,#1          ; I can: it is a GameGear
+    ld l,#0          ; I can: port3E is *not* effective
     jr cont
 
 no_match:
-    ld l,#0          ; I failed: it is a Master System
+    ld l,#1          ; I failed: port3E *is* effective
 
 cont:
-    ld a,(_SMS_Port3FBIOSvalue)
+    ld a,(_SMS_Port3EBIOSvalue)
     out (#0x3E),a    ; restore port 0x3E
     ei               ; re-enable interrupts!
 
@@ -283,13 +288,13 @@ cont:
   __endasm;
 }
 
-bool is_GameGear (void) __naked {
+bool is_Port3E_effective (void) __naked {
   __asm
     ld hl,#CART_CHECK_ADDR
     ld de,#_temp_buf
     ld bc,#CART_CHECK_SIZE
     ldir                           ; copy some bytes from card/cartridge/expansion to RAM
-    ld hl,#_detect_GG
+    ld hl,#_detect_Port3E_effectiveness
     ld de,#_code_in_RAM
     ld bc,#CODE_IN_RAM_SIZE
     ldir                           ; copy code in RAM
@@ -341,21 +346,34 @@ unsigned char port0 (void) __naked {
 }
 */
 
-bool newVDP (void) {
+unsigned char detectVDPSpriteZoomCapabilities (void) {
   unsigned char i;
   SMS_VRAMmemset (0x0000, 0xFF, 32);         // a 'full' tile
   SMS_useFirstHalfTilesforSprites(true);
   SMS_setSpriteMode (SPRITEMODE_ZOOMED);
+  
   SMS_initSprites();
-  for (i=0;i<5;i++)
-    SMS_addSprite (16*i, 0, 0);  // first 5 sprites, evenly spaced horizontally
-  SMS_addSprite (16*i-1, 0, 0);  // 6th sprite, one pixel 'too' to the left
-  SMS_finalizeSprites();
+  SMS_addSprite (0, 0, 0);    // first sprite
+  SMS_addSprite (15, 0, 0);   // second sprite, one pixel 'too' to the left
   SMS_waitForVBlank();           // wait VBlank
   SMS_copySpritestoSAT();        // copy sprites to SAT
   SMS_waitForVBlank();           // wait next VBlank...
-  // ... and if it's a SMSII the collision flag will be ON
-  return (SMS_VDPFlags & VDPFLAG_SPRITECOLLISION);
+  // ... and if it's a MD the collision flag will be OFF
+  if (!(SMS_VDPFlags & VDPFLAG_SPRITECOLLISION))
+  return (SZC_ABSENT);
+  
+  SMS_initSprites();
+  for (i=0;i<5;i++)
+    SMS_addSprite (16*i, 0, 0);  // first 5 sprites, evenly spaced horizontally
+  SMS_addSprite (16*i-1, 0, 0);  // 6th sprite, one pixel 'too' to the left (will overlap 5th sprite if it has been correctly zoomed)
+  SMS_waitForVBlank();           // wait VBlank
+  SMS_copySpritestoSAT();        // copy sprites to SAT
+  SMS_waitForVBlank();           // wait next VBlank...
+  // ... and if it's a fixed VDP the collision flag will be ON
+  if (SMS_VDPFlags & VDPFLAG_SPRITECOLLISION)
+    return(SZC_COMPLETE);   // sprite zoom fully working
+  else
+    return(SZC_PARTIAL);    // zoom bugged
 }
 
 void draw_footer_and_ver (void) {
@@ -363,14 +381,19 @@ void draw_footer_and_ver (void) {
   // print console model
   SMS_setNextTileatXY(FOOTER_COL,FOOTER_ROW);
   printf (" Model:");
-  if (SMS_getKeysStatus() & CARTRIDGE_SLOT)
+  if (is_MegaDrive)
     printf ("Genesis/MegaDrive  ");
-  else if (is_GG)
-    printf ("Game Gear          ");
-  else if (has_new_VDP)
-    printf ("Master System II   ");
-  else
-    printf ("Master System      ");
+  else if (do_Port3E_works) {
+    if (has_new_VDP)
+      printf ("Master System II   ");
+    else
+      printf ("Master System      ");
+  } else {                               //   !do_Port3E_works
+    if (has_new_VDP)
+      printf ("Game Gear          ");    // no port3E support, new VDP
+    else
+      printf ("Mark III           ");    // no port3E support, old VDP
+  }
 
   // print region
   SMS_setNextTileatXY(FOOTER_COL,FOOTER_ROW+1);
@@ -570,7 +593,7 @@ void video_tests (void) {
         case 3:static_screen(grid__tiles__psgcompr,grid__tilemap__stmcompr,grid__palette__bin,NULL); break;
         case 4:static_screen(stripes__tiles__psgcompr,fullscreen__tilemap__stmcompr,bw_palette_bin,checkerboard__tiles__psgcompr); break;
         case 5:fullscreen(); break;
-        case 6:if ((!(SMS_getKeysStatus() & CARTRIDGE_SLOT)) && (is_GG))  // if it's a GameGear
+        case 6:if ((!is_MegaDrive) && (!do_Port3E_works) && (has_new_VDP))  // if it's a GameGear
                  static_screen(linearity_GG__tiles__psgcompr,linearity_GG__tilemap__stmcompr,linearity__palette__bin,NULL);
                else if (TV_model & VDP_PAL)
                  static_screen(linearity_PAL__tiles__psgcompr,linearity_PAL__tilemap__stmcompr,linearity__palette__bin,NULL);
@@ -719,7 +742,8 @@ void pad_tests (void) {
       if (--pause_cnt==0)
         SMS_setBGPaletteColor(COLOR_PAUSE,BLACK);
 
-    if (((kp | kr | mp | mr) & ~CARTRIDGE_SLOT)==0) {
+    // if there are no keys pressed or held or released in (approx.) 3 seconds, leave the test
+    if ((((kp | kr | mp | mr) & ~CARTRIDGE_SLOT)==0) && ((SMS_getKeysHeld() & ~CARTRIDGE_SLOT)==0) && (SMS_getMDKeysHeld()==0)) {
       if (++stay_cnt>APPROX_3_SECS)
         should_stay=false;
     } else
@@ -746,7 +770,11 @@ void sysinfo (void) {
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+1);
   printf (" JPN?:%-3s     ",(is_Japanese?"Yes":"No"));
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+2);
-  printf (" VDP?:%s",(has_new_VDP?"315-5246":"315-5124"));
+  printf (" VDP?:");
+  if (is_MegaDrive)
+    printf ("315-5313");
+  else
+    printf ("%s",(has_new_VDP?"315-5246":"315-5124"));
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+3);
   printf (" TV? :");
   if (TV_model & VDP_NTSC)
@@ -756,9 +784,9 @@ void sysinfo (void) {
   else
     printf ("*???*     ");               // undetected TV (?)
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+4);
-  printf (" GameGear?:%-3s    ",(is_GG?"Yes":"No"));
+  printf (" MediaEnable?:%-3s ",(do_Port3E_works?"Yes":"No"));
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+5);
-  if ((!(SMS_getKeysStatus() & CARTRIDGE_SLOT)) && (!is_GG)) {        // if not MegaDrive and not GameGear
+  if ((!is_MegaDrive) && (do_Port3E_works)) {   // if not MegaDrive and not GameGear and not Mark III
     sum8k=get_BIOS_sum();
     printf (" BIOS sum: 0x%04X ",sum8k);
     SMS_setNextTileatXY(1,20);
@@ -795,12 +823,17 @@ void main (void) {
   // detect region
   is_Japanese=isJapanese();
 
+  // detect if Port3E features are present
+  do_Port3E_works=is_Port3E_effective();
+
   // detect TV and console type using various means
-  // port_0=port0();
-  is_GG=is_GameGear();
   SMS_displayOn();
   TV_model=SMS_VDPType();
-  has_new_VDP=newVDP();
+  //has_new_VDP=newVDP();
+  unsigned char ZoomCapabilities=detectVDPSpriteZoomCapabilities();
+  is_MegaDrive=(ZoomCapabilities==SZC_ABSENT);
+  has_new_VDP=(ZoomCapabilities==SZC_COMPLETE);
+  
   SMS_displayOff();
 
   // restore standard operation modes

@@ -3,7 +3,7 @@ SMS Test Suite
 
 *largely inspired by Artemio's 240p, but not a fork of it!*
 
-####Functions:
+## Functions:
 
 ### Video Tests
 (video test descriptions mainly taken from http://junkerhq.net/xrgb/index.php?title=240p_test_suite)

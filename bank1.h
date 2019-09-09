@@ -37,15 +37,15 @@ extern const unsigned char	linearity_GG__tilemap__stmcompr[460];
 extern const unsigned char	linearity_PAL__tiles__psgcompr[429];
 #define				linearity_PAL__tiles__psgcompr_size 429
 #define				linearity_PAL__tiles__psgcompr_bank 1
-extern const unsigned char	CH0_psgc[374];
-#define				CH0_psgc_size 374
-#define				CH0_psgc_bank 1
-extern const unsigned char	CH1_psgc[374];
-#define				CH1_psgc_size 374
-#define				CH1_psgc_bank 1
 extern const unsigned char	CH2_psgc[374];
 #define				CH2_psgc_size 374
 #define				CH2_psgc_bank 1
+extern const unsigned char	CH1_psgc[374];
+#define				CH1_psgc_size 374
+#define				CH1_psgc_bank 1
+extern const unsigned char	CH0_psgc[374];
+#define				CH0_psgc_size 374
+#define				CH0_psgc_bank 1
 extern const unsigned char	PLUGE__tilemap__stmcompr[204];
 #define				PLUGE__tilemap__stmcompr_size 204
 #define				PLUGE__tilemap__stmcompr_bank 1
@@ -118,12 +118,12 @@ extern const unsigned char	linearity__palette__bin[4];
 extern const unsigned char	PLUGE__palette__bin[4];
 #define				PLUGE__palette__bin_size 4
 #define				PLUGE__palette__bin_bank 1
+extern const unsigned char	controller__palette__inc[2];
+#define				controller__palette__inc_size 2
+#define				controller__palette__inc_bank 1
 extern const unsigned char	bw_palette_bin[2];
 #define				bw_palette_bin_size 2
 #define				bw_palette_bin_bank 1
 extern const unsigned char	controller__palette__bin[2];
 #define				controller__palette__bin_size 2
 #define				controller__palette__bin_bank 1
-extern const unsigned char	controller__palette__inc[2];
-#define				controller__palette__inc_size 2
-#define				controller__palette__inc_bank 1
