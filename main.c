@@ -4,7 +4,10 @@
 ************************************************************************ */
 
 #define MAJOR_VER 0
-#define MINOR_VER 28
+#define MINOR_VER 29
+
+#define MIN(a,b)  (((a)<(b))?(a):(b))
+#define MAX(a,b)  (((a)>=(b))?(a):(b))
 
 #include <stdio.h>
 #include <stdbool.h>
@@ -16,11 +19,12 @@
 
 #include "bank1.h"
 
-#define MAIN_MENU_ITEMS 4
+#define MAIN_MENU_ITEMS 5
 const unsigned char *main_menu[MAIN_MENU_ITEMS] =   {"Video Tests",
                                                      "Audio Tests",
                                                      "Pad Tests",
-                                                     "System Info"};
+                                                     "System Info",
+                                                     "Paddle Tests"};
 
 #define VIDEO_MENU_ITEMS 10
 const unsigned char *video_menu[VIDEO_MENU_ITEMS] = {"PLUGE",
@@ -60,16 +64,15 @@ const struct {
 #define MENU_FIRST_ROW  8
 #define MENU_FIRST_COL  4
 
-#define FOOTER_COL  3
+#define FOOTER_COL  1
 #define FOOTER_ROW  21
 
-unsigned char cur_menu_item;
-unsigned char pointer_anim;
-
+unsigned char cur_menu_item, main_menu_items, pointer_anim;
 
 /* hardware tests results */
 unsigned char TV_model;
 bool is_MegaDrive,has_new_VDP,is_Japanese,do_Port3E_works;
+unsigned char some_paddle_connected;
 
 /* VDP sprite zoom capabilities */
 #define SZC_ABSENT   0
@@ -95,6 +98,15 @@ bool is_MegaDrive,has_new_VDP,is_Japanese,do_Port3E_works;
 
 #define HILIT_COLOR      0x2F
 #define BLACK            0x00
+
+/*  ****************** for PADDLE TESTS *********************** */
+
+#define COLOR_PADDLE_A       10
+#define COLOR_PADDLE_B       12
+#define COLOR_PADDLE_A_1     2
+#define COLOR_PADDLE_B_1     11
+
+#define PADDLE_THRESHOLD     8
 
 #define APPROX_1_SEC     55
 #define APPROX_3_SECS    (APPROX_1_SEC*3)
@@ -336,6 +348,121 @@ _IsJap:
   __endasm;
 }
 
+#pragma save
+#pragma disable_warning 85
+bool paddle_detection (unsigned char which) __z88dk_fastcall __naked {
+  __asm
+    ld a,l
+    or a
+    ld bc,#0
+    jr nz, detect_second_pad
+
+read:    
+    in a,(#0xDC)
+    and #0x20
+    jr nz, skip_inc
+    inc c
+    
+skip_inc:
+    djnz read
+    jr discriminate
+  
+detect_second_pad:
+    in a,(#0xDD)
+    and #08
+    jr nz, skip_inc_2
+    inc c
+    
+skip_inc_2:
+    djnz detect_second_pad
+  
+discriminate:
+    ld a,c
+    ld l,#0     ; set false
+    sub #0x60
+    ret c
+    cp #0x40
+    ret nc
+    inc l       ; set true
+    ret
+  __endasm;
+}
+
+unsigned char read_paddle (unsigned char which) __z88dk_fastcall __naked {
+  __asm
+    ld a,l
+    or a
+    jr nz, read_second_pad
+  
+wait_5_reset:  
+    in a,(#0xDC)
+    bit 5,a
+    jr nz, wait_5_reset     ; wait until bit 5 is 0
+    and #0x0F
+    ld l,a                  ; save lower 4 bits into l
+    
+wait_5_set:    
+    in a,(#0xDC)
+    bit 5,a
+    jr z, wait_5_set        ; wait until bit 5 is 1
+    and #0x0F               ; save lower 4 bits
+    add a,a
+    add a,a
+    add a,a
+    add a,a
+    or l                    ; move to high nibble
+    ld l,a                  ; together with lower part
+    ret
+    
+read_second_pad:
+    ld c,#0xDC
+
+wait_3_reset:
+    in a,(#0xDD)            ; ensure we are reading both ports same moment
+    ld e,a
+    in b,(c)
+    in a,(#0xDD)
+    or e
+    bit 3,a
+    jr nz, wait_3_reset     ; wait until bit 5 is 0
+    ld a,b
+    and #0xC0               ; save upper 2 bits 
+    rlca
+    rlca
+    ld l,a                  ; into l (bits 0,1)
+    ld a,e
+    and #0x03               ; save lower 2 bits
+    rlca
+    rlca
+    or l                    ; together with l
+    ld l,a                  ; into l (bits 2,3)
+    
+wait_3_set:
+    in a,(#0xDD)            ; ensure we are reading both ports same moment
+    ld e,a
+    in b,(c)
+    in a,(#0xDD)
+    and e
+    bit 3,a
+    jr z, wait_3_set        ; wait until bit 5 is 1
+    ld a,b
+    and #0xC0               ; save upper 2 bits 
+    rrca
+    rrca
+    ld h,a                  ; into h (bits 4,5)
+    ld a,e
+    and #0x03               ; save lower 2 bits
+    rrca
+    rrca
+    or h                    ; together with h (bits 6,7)
+    or l                    ; together with lower part
+    ld l,a
+    ret
+
+  __endasm;
+}
+#pragma restore
+
 /*
 unsigned char port0 (void) __naked {
   __asm
@@ -360,7 +487,7 @@ unsigned char detectVDPSpriteZoomCapabilities (void) {
   SMS_waitForVBlank();           // wait next VBlank...
   // ... and if it's a MD the collision flag will be OFF
   if (!(SMS_VDPFlags & VDPFLAG_SPRITECOLLISION))
-  return (SZC_ABSENT);
+    return (SZC_ABSENT);
   
   SMS_initSprites();
   for (i=0;i<5;i++)
@@ -382,30 +509,30 @@ void draw_footer_and_ver (void) {
   SMS_setNextTileatXY(FOOTER_COL,FOOTER_ROW);
   printf (" Model:");
   if (is_MegaDrive)
-    printf ("Genesis/MegaDrive  ");
+      printf ("Genesis/MegaDrive      ");
   else if (do_Port3E_works) {
     if (has_new_VDP)
-      printf ("Master System II   ");
+      printf ("Master System II       ");
     else
-      printf ("Master System      ");
+      printf ("Master System          ");
   } else {                               //   !do_Port3E_works
     if (has_new_VDP)
-      printf ("Game Gear          ");    // no port3E support, new VDP
+      printf ("Game Gear              ");    // no port3E support, new VDP
     else
-      printf ("Mark III           ");    // no port3E support, old VDP
+      printf ("Mark III               ");    // no port3E support, old VDP
   }
 
   // print region
   SMS_setNextTileatXY(FOOTER_COL,FOOTER_ROW+1);
   printf (" Region:");
   if (is_Japanese)
-    printf ("JPN");                 // Japanese
+    printf ("JPN/KOR");                 // Japanese/Korean
   else if (TV_model & VDP_NTSC)
-    printf ("USA");                 // not Japanese and 60 Hz
+    printf ("USA/BRA");                 // not Japanese and 60 Hz => USA/Brasil
   else if (TV_model & VDP_PAL)
-    printf ("EUR");                 // not Japanese and 50 Hz
+    printf ("EUR/AUS");                 // not Japanese and 50 Hz => EUR/Australia
   else
-    printf ("???");                 // not Japanese and undetected TV (this shouldn't happen with current detection routine)
+    printf ("- ??? -");                 // not Japanese and undetected TV (this shouldn't happen with current detection routine)
 
   // print TV mode
   printf (" TV:");
@@ -415,6 +542,12 @@ void draw_footer_and_ver (void) {
     printf ("60Hz (NTSC)");
   else
     printf ("undetected ");            // (this shouldn't happen with current detection routine)
+    
+  // print if paddle is detected
+  if (some_paddle_connected) {
+    SMS_setNextTileatXY(FOOTER_COL,FOOTER_ROW-1);
+    printf (" Paddle Control found in [%c]  ",(some_paddle_connected==0x01)?'1':'2');
+  }
 
   // print program version (just under the title)
   SMS_setNextTileatXY(3,4);
@@ -442,6 +575,13 @@ void load_menu_assets (void) {
   SMS_autoSetUpTextRenderer();
 }
 
+unsigned int filter_paddle(unsigned int value) {
+  if (some_paddle_connected & 0x01)
+    value&=~PORT_A_KEY_2;
+  if (some_paddle_connected & 0x02)
+    value&=~PORT_B_KEY_2;
+  return (value);
+}
 
 void static_screen (void* tiles, void* tilemap, void* palette, void* alt_tiles) {
   bool alt=false;
@@ -454,7 +594,7 @@ void static_screen (void* tiles, void* tilemap, void* palette, void* alt_tiles) 
   SMS_displayOn();
   for (;;) {
     SMS_waitForVBlank();
-    kp=SMS_getKeysPressed();
+    kp=filter_paddle(SMS_getKeysPressed());
     if (kp & (PORT_A_KEY_2|PORT_B_KEY_2))
       break;
     if (kp & (PORT_A_KEY_1|PORT_B_KEY_1))
@@ -521,7 +661,7 @@ void drop_shadow_striped_sprite (bool striped) {
     SMS_waitForVBlank();
     SMS_copySpritestoSAT();
 
-    kp=SMS_getKeysPressed();
+    kp=filter_paddle(SMS_getKeysPressed());
     if (kp & (PORT_A_KEY_2|PORT_B_KEY_2|PORT_A_KEY_1|PORT_B_KEY_1))
       break;
   }
@@ -540,7 +680,7 @@ void fullscreen (void) {
     SMS_initSprites();
     SMS_waitForVBlank();
     SMS_copySpritestoSAT();
-    kp=SMS_getKeysPressed();
+    kp=filter_paddle(SMS_getKeysPressed());
     if (kp & (PORT_A_KEY_2|PORT_B_KEY_2))
       break;
     if (kp & (PORT_A_KEY_1|PORT_B_KEY_1)) {
@@ -570,7 +710,8 @@ void video_tests (void) {
     if ((++pointer_anim)==7*8)
       pointer_anim=0;
 
-    kp=SMS_getKeysPressed();
+    kp=filter_paddle(SMS_getKeysPressed());
+    
     if (kp & (PORT_A_KEY_UP|PORT_B_KEY_UP)) {        // UP
       if (cur_menu_item>0)
         cur_menu_item--;
@@ -615,8 +756,6 @@ void video_tests (void) {
 }
 
 void audio_test (void) {
-  bool should_stay=true;
-
   SMS_displayOff();
   SMS_initSprites();
   SMS_copySpritestoSAT();
@@ -625,13 +764,10 @@ void audio_test (void) {
   SMS_loadBGPalette(controller__palette__bin);
   SMS_displayOn();
 
-  while(should_stay) {
+  for(;;) {
     SMS_waitForVBlank();
     PSGFrame();
-    // read controller
-    kp=SMS_getKeysPressed();
-
-        // press
+    kp=filter_paddle(SMS_getKeysPressed());
     if (kp & (PORT_A_KEY_UP|PORT_B_KEY_UP))
       PSGPlay(CH0_psgc);
     if (kp & (PORT_A_KEY_RIGHT|PORT_B_KEY_RIGHT))
@@ -643,8 +779,9 @@ void audio_test (void) {
     if (kp & (PORT_A_KEY_1|PORT_B_KEY_1))
       PSGPlay(VolumeTest_psgc);
     if (kp & (PORT_A_KEY_2|PORT_B_KEY_2))
-      PSGStop(),should_stay=false;
+      break;
   }
+  PSGStop();
 }
 
 void pad_tests (void) {
@@ -666,8 +803,8 @@ void pad_tests (void) {
     SMS_waitForVBlank();
 
     // read controller
-    kp=SMS_getKeysPressed();
-    kr=SMS_getKeysReleased();
+    kp=filter_paddle(SMS_getKeysPressed());
+    kr=filter_paddle(SMS_getKeysReleased());
 
     // read MD controller
     mp=SMS_getMDKeysPressed();
@@ -743,7 +880,7 @@ void pad_tests (void) {
         SMS_setBGPaletteColor(COLOR_PAUSE,BLACK);
 
     // if there are no keys pressed or held or released in (approx.) 3 seconds, leave the test
-    if ((((kp | kr | mp | mr) & ~CARTRIDGE_SLOT)==0) && ((SMS_getKeysHeld() & ~CARTRIDGE_SLOT)==0) && (SMS_getMDKeysHeld()==0)) {
+    if ((((kp | kr | mp | mr) & ~CARTRIDGE_SLOT)==0) && ((filter_paddle(SMS_getKeysHeld()) & ~CARTRIDGE_SLOT)==0) && (SMS_getMDKeysHeld()==0)) {
       if (++stay_cnt>APPROX_3_SECS)
         should_stay=false;
     } else
@@ -751,11 +888,84 @@ void pad_tests (void) {
   }
 }
 
+void paddle_test (bool stay_forever) {
+  unsigned char i,stay_cnt=0;
+  unsigned char p1=0,p2=0,old_p1=0,old_p2=0;
+  bool should_stay=true;
+
+  SMS_displayOff();
+  SMS_initSprites();
+  SMS_copySpritestoSAT();
+  SMS_loadPSGaidencompressedTiles (paddles__tiles__psgcompr,0);
+  SMS_loadPSGaidencompressedTiles (ball__tiles__psgcompr,256);
+  SMS_loadSTMcompressedTileMap (0,0,paddles__tilemap__stmcompr);
+  for (i=0;i<15;i++)
+    SMS_setBGPaletteColor(i,0x00);    // black
+  SMS_setBGPaletteColor(15,0x3f);     // white
+
+  SMS_resetPauseRequest();            // there might be a previous pending request
+  SMS_displayOn();
+  while(should_stay) {
+    SMS_waitForVBlank();
+    SMS_copySpritestoSAT();
+    
+    SMS_initSprites();
+    // read paddle controller knob position
+    if (some_paddle_connected & 0x01) {
+      old_p1=p1;
+      p1=read_paddle(0);
+      SMS_addSprite(p1/2+58,85,0);  // cursor paddle 1
+    }
+    if (some_paddle_connected & 0x02) {
+      old_p2=p2;
+      p2=read_paddle(1);
+      SMS_addSprite(p2/2+58,180,0);  // cursor paddle 2
+    }
+    
+    // read paddle buttons
+    kp=filter_paddle(SMS_getKeysPressed());
+    kr=filter_paddle(SMS_getKeysReleased());
+    
+    // press key
+    if (kp & PORT_A_KEY_1)
+      SMS_setBGPaletteColor(COLOR_PADDLE_A_1,HILIT_COLOR);
+    if (kp & PORT_B_KEY_1)
+      SMS_setBGPaletteColor(COLOR_PADDLE_B_1,HILIT_COLOR);
+      
+    // release key
+    if (kr & PORT_A_KEY_1)
+      SMS_setBGPaletteColor(COLOR_PADDLE_A_1,BLACK);
+    if (kr & PORT_B_KEY_1)
+      SMS_setBGPaletteColor(COLOR_PADDLE_B_1,BLACK);  
+    
+    // moving paddle 1
+    if ((MAX(p1,old_p1)-MIN(p1,old_p1))>PADDLE_THRESHOLD) {
+      SMS_setBGPaletteColor(COLOR_PADDLE_A,HILIT_COLOR);
+      stay_cnt=0;
+    } else
+      SMS_setBGPaletteColor(COLOR_PADDLE_A,BLACK);
+    
+    // moving paddle 2  
+    if ((MAX(p2,old_p2)-MIN(p2,old_p2))>PADDLE_THRESHOLD) {
+      SMS_setBGPaletteColor(COLOR_PADDLE_B,HILIT_COLOR);
+      stay_cnt=0; 
+    } else
+      SMS_setBGPaletteColor(COLOR_PADDLE_B,BLACK);    
+    
+    if ((((kp | kr) & ~CARTRIDGE_SLOT)==0) && ((filter_paddle(SMS_getKeysHeld()) & ~CARTRIDGE_SLOT)==0) && (!stay_forever)) {
+      if (++stay_cnt>APPROX_3_SECS)
+        should_stay=false;
+    } else
+      stay_cnt=0;
+  
+  }
+}
+
 void prepare_and_show_main_menu (void) {
   SMS_displayOff();
   load_menu_assets();
   draw_footer_and_ver();
-  draw_menu(main_menu, MAIN_MENU_ITEMS);
+  draw_menu(main_menu, main_menu_items);
 }
 
 void sysinfo (void) {
@@ -778,18 +988,18 @@ void sysinfo (void) {
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+3);
   printf (" TV? :");
   if (TV_model & VDP_NTSC)
-    printf ("60Hz(NTSC)");               // 60 Hz
+    printf ("60Hz (NTSC)");               // 60 Hz
   else if (TV_model & VDP_PAL)
-    printf ("50Hz(PAL) ");               // 50 Hz
+    printf ("50Hz (PAL) ");               // 50 Hz
   else
-    printf ("*???*     ");               // undetected TV (?)
+    printf ("*???*      ");               // undetected TV (?)
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+4);
   printf (" MediaEnable?:%-3s ",(do_Port3E_works?"Yes":"No"));
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+5);
   if ((!is_MegaDrive) && (do_Port3E_works)) {   // if not MegaDrive and not GameGear and not Mark III
     sum8k=get_BIOS_sum();
     printf (" BIOS sum: 0x%04X ",sum8k);
-    SMS_setNextTileatXY(1,20);
+    SMS_setNextTileatXY(1,MENU_FIRST_ROW+7);
     while (i<BIOSES_ITEMS) {
       if (sum8k==BIOSes[i].sum8k) {
         printf ("%-30s",BIOSes[i].name);
@@ -799,13 +1009,12 @@ void sysinfo (void) {
     }
     if (i==BIOSES_ITEMS)
       printf ("** unidentified BIOS found! **");
-    SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+6);
   }
-  printf (" more to come...  ");
 
   for (;;) {
     SMS_waitForVBlank();
-    kp=SMS_getKeysPressed();
+    kp=filter_paddle(SMS_getKeysPressed());
+      
     if (kp & (PORT_A_KEY_DOWN|PORT_B_KEY_DOWN)) {
       SMS_enableSRAM();
       dump_BIOS();
@@ -815,9 +1024,6 @@ void sysinfo (void) {
       break;
   }
 }
-
-
-
 
 void main (void) {
   // detect region
@@ -835,12 +1041,18 @@ void main (void) {
   has_new_VDP=(ZoomCapabilities==SZC_COMPLETE);
   
   SMS_displayOff();
+  
+  some_paddle_connected=(paddle_detection(0))|(paddle_detection(1)<<1);
+  main_menu_items=(some_paddle_connected)?MAIN_MENU_ITEMS:MAIN_MENU_ITEMS-1;
 
   // restore standard operation modes
   SMS_initSprites();
   SMS_copySpritestoSAT();
   SMS_useFirstHalfTilesforSprites(false);
   SMS_setSpriteMode (SPRITEMODE_NORMAL);
+  
+  if (some_paddle_connected==0x03)  // two paddles connected!
+    paddle_test(true);              // show the paddle test until someone turns off the SMS and remove at least one of them!
 
   // prepare and show main menu
   prepare_and_show_main_menu();
@@ -855,29 +1067,44 @@ void main (void) {
     if ((++pointer_anim)==7*8)
       pointer_anim=0;
 
-    kp=SMS_getKeysPressed();
+    kp=filter_paddle(SMS_getKeysPressed());
+   
     if (kp & (PORT_A_KEY_UP|PORT_B_KEY_UP)) {        // UP
       if (cur_menu_item>0)
         cur_menu_item--;
       else
-        cur_menu_item=MAIN_MENU_ITEMS-1;
+        cur_menu_item=main_menu_items-1;
       pointer_anim=0;
     }
     if (kp & (PORT_A_KEY_DOWN|PORT_B_KEY_DOWN)) {    // DOWN
-      if (cur_menu_item<(MAIN_MENU_ITEMS-1))
+      if (cur_menu_item<(main_menu_items-1))
         cur_menu_item++;
       else
         cur_menu_item=0;
       pointer_anim=0;
     }
-    if (kp & (PORT_A_KEY_1|PORT_A_KEY_2|PORT_B_KEY_1|PORT_B_KEY_2)) {
+    if (kp & (PORT_A_KEY_1|PORT_B_KEY_1)) {
       switch (cur_menu_item) {
         case 0:video_tests(); break;
         case 1:audio_test(); break;
         case 2:pad_tests(); break;
         case 3:sysinfo(); break;
+        case 4:paddle_test(false); break;
       }
       prepare_and_show_main_menu();
+      SMS_resetPauseRequest();
+    }
+    
+    // if PAUSE has been pressed, restart the ROM (after setting RAM location 0xC000 to what was initially)
+    if (SMS_queryPauseRequested()) {
+      SMS_displayOff();
+      SMS_zeroBGPalette();
+      __asm
+         di
+         ld a,(_SMS_Port3EBIOSvalue)
+         ld (#0xC000),a
+         rst #0
+      __endasm;
     }
 
   }

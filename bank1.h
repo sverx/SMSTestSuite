@@ -13,6 +13,9 @@ extern const unsigned char	linearity_GG__tiles__psgcompr[1094];
 extern const unsigned char	controller__tiles__psgcompr[1082];
 #define				controller__tiles__psgcompr_size 1082
 #define				controller__tiles__psgcompr_bank 1
+extern const unsigned char	paddles__tiles__psgcompr[1011];
+#define				paddles__tiles__psgcompr_size 1011
+#define				paddles__tiles__psgcompr_bank 1
 extern const unsigned char	color_bars__tiles__psgcompr[724];
 #define				color_bars__tiles__psgcompr_size 724
 #define				color_bars__tiles__psgcompr_bank 1
@@ -37,6 +40,9 @@ extern const unsigned char	linearity_GG__tilemap__stmcompr[460];
 extern const unsigned char	linearity_PAL__tiles__psgcompr[429];
 #define				linearity_PAL__tiles__psgcompr_size 429
 #define				linearity_PAL__tiles__psgcompr_bank 1
+extern const unsigned char	paddles__tilemap__stmcompr[401];
+#define				paddles__tilemap__stmcompr_size 401
+#define				paddles__tilemap__stmcompr_bank 1
 extern const unsigned char	CH2_psgc[374];
 #define				CH2_psgc_size 374
 #define				CH2_psgc_bank 1
@@ -94,6 +100,9 @@ extern const unsigned char	BG__palette__bin[16];
 extern const unsigned char	color_bars__palette__bin[13];
 #define				color_bars__palette__bin_size 13
 #define				color_bars__palette__bin_bank 1
+extern const unsigned char	ball__tiles__psgcompr[11];
+#define				ball__tiles__psgcompr_size 11
+#define				ball__tiles__psgcompr_bank 1
 extern const unsigned char	arrow__tiles__psgcompr[11];
 #define				arrow__tiles__psgcompr_size 11
 #define				arrow__tiles__psgcompr_bank 1
