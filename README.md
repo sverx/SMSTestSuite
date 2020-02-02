@@ -64,6 +64,10 @@ There are actually deinterlacers out there which can display the drop shadows co
 
 You can test your SEGA Master System and SEGA MegaDrive/Genesis (*port A only*) pads, your console PAUSE and RESET keys, and your console ports too. If no key is pressed/held/released in approx 3 seconds, the test will end.
 
+### Paddle Tests
+
+You can test your SEGA Master System (Japanese) Paddle(s) in either port. If the knob isn't rotated or paddle key is not pressed/held/released in approx 3 seconds the test will end. PAUSE will also end the test. If paddle wasn't connected when the Test Suite started, you can connect that while in the main menu and press PAUSE to restart it, to have that detected. If two paddles are connected when the Test Suite starts, paddle test will be run immediatelym but it won't be possible to leave the test.
+
 ### System Info
 
 You can read some info about your system. In detail:

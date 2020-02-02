@@ -577,9 +577,9 @@ void load_menu_assets (void) {
 
 unsigned int filter_paddle(unsigned int value) {
   if (some_paddle_connected & 0x01)
-    value&=~PORT_A_KEY_2;
+    value&=~(PORT_A_KEY_2|PORT_A_KEY_UP|PORT_A_KEY_DOWN|PORT_A_KEY_LEFT|PORT_A_KEY_RIGHT);
   if (some_paddle_connected & 0x02)
-    value&=~PORT_B_KEY_2;
+    value&=~(PORT_B_KEY_2|PORT_B_KEY_UP|PORT_B_KEY_DOWN|PORT_B_KEY_LEFT|PORT_B_KEY_RIGHT);
   return (value);
 }
 
@@ -905,7 +905,7 @@ void paddle_test (bool stay_forever) {
 
   SMS_resetPauseRequest();            // there might be a previous pending request
   SMS_displayOn();
-  while(should_stay) {
+  while(stay_forever || should_stay) {
     SMS_waitForVBlank();
     SMS_copySpritestoSAT();
     
@@ -928,36 +928,36 @@ void paddle_test (bool stay_forever) {
     
     // press key
     if (kp & PORT_A_KEY_1)
-      SMS_setBGPaletteColor(COLOR_PADDLE_A_1,HILIT_COLOR);
+      SMS_setBGPaletteColor(COLOR_PADDLE_A_1,HILIT_COLOR), stay_cnt=0;
     if (kp & PORT_B_KEY_1)
-      SMS_setBGPaletteColor(COLOR_PADDLE_B_1,HILIT_COLOR);
+      SMS_setBGPaletteColor(COLOR_PADDLE_B_1,HILIT_COLOR), stay_cnt=0;
       
     // release key
     if (kr & PORT_A_KEY_1)
-      SMS_setBGPaletteColor(COLOR_PADDLE_A_1,BLACK);
+      SMS_setBGPaletteColor(COLOR_PADDLE_A_1,BLACK), stay_cnt=0;
     if (kr & PORT_B_KEY_1)
-      SMS_setBGPaletteColor(COLOR_PADDLE_B_1,BLACK);  
+      SMS_setBGPaletteColor(COLOR_PADDLE_B_1,BLACK), stay_cnt=0;  
     
     // moving paddle 1
-    if ((MAX(p1,old_p1)-MIN(p1,old_p1))>PADDLE_THRESHOLD) {
-      SMS_setBGPaletteColor(COLOR_PADDLE_A,HILIT_COLOR);
-      stay_cnt=0;
-    } else
+    if ((MAX(p1,old_p1)-MIN(p1,old_p1))>PADDLE_THRESHOLD)
+      SMS_setBGPaletteColor(COLOR_PADDLE_A,HILIT_COLOR), stay_cnt=0;
+    else
       SMS_setBGPaletteColor(COLOR_PADDLE_A,BLACK);
     
     // moving paddle 2  
-    if ((MAX(p2,old_p2)-MIN(p2,old_p2))>PADDLE_THRESHOLD) {
-      SMS_setBGPaletteColor(COLOR_PADDLE_B,HILIT_COLOR);
-      stay_cnt=0; 
-    } else
-      SMS_setBGPaletteColor(COLOR_PADDLE_B,BLACK);    
+    if ((MAX(p2,old_p2)-MIN(p2,old_p2))>PADDLE_THRESHOLD)
+      SMS_setBGPaletteColor(COLOR_PADDLE_B,HILIT_COLOR), stay_cnt=0;
+    else
+      SMS_setBGPaletteColor(COLOR_PADDLE_B,BLACK);
     
-    if ((((kp | kr) & ~CARTRIDGE_SLOT)==0) && ((filter_paddle(SMS_getKeysHeld()) & ~CARTRIDGE_SLOT)==0) && (!stay_forever)) {
-      if (++stay_cnt>APPROX_3_SECS)
-        should_stay=false;
-    } else
-      stay_cnt=0;
-  
+    // if no action for 3 seconds, leave  
+    if (++stay_cnt>APPROX_3_SECS)
+      should_stay=false;
+    
+    // if PAUSE pressed, leave
+    if (SMS_queryPauseRequested())
+      SMS_resetPauseRequest(), should_stay=false;
+
   }
 }
 
