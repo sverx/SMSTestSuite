@@ -4,7 +4,7 @@
 ************************************************************************ */
 
 #define MAJOR_VER 0
-#define MINOR_VER 29
+#define MINOR_VER 32
 
 #define MIN(a,b)  (((a)<(b))?(a):(b))
 #define MAX(a,b)  (((a)>=(b))?(a):(b))
@@ -20,27 +20,27 @@
 #include "bank1.h"
 
 #define MAIN_MENU_ITEMS 5
-const unsigned char *main_menu[MAIN_MENU_ITEMS] =   {"Video Tests",
-                                                     "Audio Tests",
-                                                     "Pad Tests",
-                                                     "System Info",
-                                                     "Paddle Tests"};
+const unsigned char * const main_menu[MAIN_MENU_ITEMS] =   {"Video Tests",
+                                                            "Audio Tests",
+                                                            "Pad Tests",
+                                                            "System Info",
+                                                            "Paddle Tests"};
 
 #define VIDEO_MENU_ITEMS 10
-const unsigned char *video_menu[VIDEO_MENU_ITEMS] = {"PLUGE",
-                                                     "Color bars",
-                                                     "Color bleed",
-                                                     "Grid",
-                                                     "Stripes/Checks",
-                                                     "Full colors",
-                                                     "Linearity",
-                                                     "Drop Shadow",
-                                                     "Striped sprite",
-                                                     "[ back ]"};
+const unsigned char * const video_menu[VIDEO_MENU_ITEMS] = {"PLUGE",
+                                                            "Color bars",
+                                                            "Color bleed",
+                                                            "Grid",
+                                                            "Stripes/Checks",
+                                                            "Full colors",
+                                                            "Linearity",
+                                                            "Drop Shadow",
+                                                            "Striped sprite",
+                                                            "[ back ]"};
 #define BIOSES_ITEMS 13
 const struct {
   const unsigned int sum8k;
-  const unsigned char *name;
+  const unsigned char * const name;
 } BIOSes[BIOSES_ITEMS] = {
   {0x9204,"Alex Kidd in Miracle World"},
   {0x8738,"Hang On & Safari Hunt"},
@@ -60,6 +60,14 @@ const struct {
   {0x6ae3,"Emulicious (emulator) BIOS"}       //  ;)
 };
 
+#define GG_BIOSES_ITEMS 2
+const struct {
+  const unsigned int sum1k;
+  const unsigned char * const name;
+} GG_BIOSes[GG_BIOSES_ITEMS] = {
+  {0x5e3a,"Majesco GameGear BIOS"},
+  {0x207e,"Emulicious (emulator) GG BIOS"}       //  ;)
+};
 
 #define MENU_FIRST_ROW  8
 #define MENU_FIRST_COL  4
@@ -71,7 +79,7 @@ unsigned char cur_menu_item, main_menu_items, pointer_anim;
 
 /* hardware tests results */
 unsigned char TV_model;
-bool is_MegaDrive,has_new_VDP,is_Japanese,do_Port3E_works;
+bool is_MegaDrive, is_GameGear, has_BIOS_GG, is_Japanese, has_new_VDP, do_Port3E_works, CMOS_CPU;
 unsigned char some_paddle_connected;
 
 /* VDP sprite zoom capabilities */
@@ -119,7 +127,8 @@ unsigned char some_paddle_connected;
 #define CODE_IN_RAM_SIZE  256
 #define TEMP_BUF_SIZE     (4*1024)
 
-#define CART_CHECK_ADDR   0x7F00
+// #define CART_CHECK_ADDR   0x7F00
+#define CART_CHECK_ADDR   0x0100
 #define CART_CHECK_SIZE   256
 
 unsigned char pause_cnt;
@@ -127,16 +136,19 @@ unsigned int kp,kr,mp,mr,ks;
 unsigned char code_in_RAM[CODE_IN_RAM_SIZE];   // 256 bytes should be enough for everything
 unsigned char temp_buf[TEMP_BUF_SIZE];
 
+#define BIOS_SIZE_8K   0x20
+#define BIOS_SIZE_1K   0x04
+
 /*  **************** [[[ CODE ]]] ************************** */
 
-unsigned int compute_BIOS_sum_8K (void) __naked {
+unsigned int compute_BIOS_sum (void) __naked {
   /* *************************
      NOTE: this code will be copied to RAM and run from there!
      *************************  */
   __asm
     di               ; interrupts should be disabled!
 
-    ld a,#0b11100011 ; reset bits 3,4 (enable BIOS/RAM) and set bits 5,6,7 (to disable card/cartridge/expansion)
+    ld a,#0b11100011 ; reset bits 4,3 (enable RAM/BIOS) and set bits 5,6,7 (to disable card/cartridge/expansion)
     out (#0x3E),a    ; do!
 
     ld de,#0         ; sum
@@ -150,12 +162,12 @@ loop:
 nocarry:
     inc hl           ; src++
     ld a,h
-    cp #0x20         ; 0x2000 = 8K
+    cp c             ; size to check preloaded in C by caller
     jr nz,loop
     ex de,hl         ; hl=sum
 
     ; ld a,#0b10101011 ; reset bits 4,6 (enable RAM/cartridge) and set bits 3,5,7 (to disable BIOS/card/expansion)
-    ld a,(_SMS_Port3EBIOSvalue)    
+    ld a,(_SMS_Port3EBIOSvalue)
     out (#0x3E),a    ; restore it
 
     ei               ; re-enable interrupts!
@@ -164,15 +176,20 @@ nocarry:
   __endasm;
 }
 
-unsigned int get_BIOS_sum (void) __naked {
+#pragma save
+#pragma disable_warning 85
+unsigned int get_BIOS_sum (unsigned char size) __naked __z88dk_fastcall {
   __asm
-    ld hl,#_compute_BIOS_sum_8K
+    ld a,l                         ; save size in A
+    ld hl,#_compute_BIOS_sum
     ld de,#_code_in_RAM
     ld bc,#CODE_IN_RAM_SIZE
     ldir                           ; copy code in RAM
+    ld c,a                         ; restore size in C
     jp _code_in_RAM
   __endasm;
 }
+#pragma restore
 
 void ldir_BIOS_SRAM (void) __naked {
   /* *************************
@@ -264,7 +281,7 @@ void dump_BIOS (void) __naked {
   __endasm;
 }
 
-unsigned char detect_Port3E_effectiveness (void)  __naked {
+unsigned char detect_Port3E_match (void)  __naked {
   /* *************************
      NOTE: this code will be copied to RAM and run from there!
      *************************  */
@@ -272,7 +289,10 @@ unsigned char detect_Port3E_effectiveness (void)  __naked {
     di               ; interrupts should be disabled!
 
     ld a,(_SMS_Port3EBIOSvalue)
-    or #0xE0         ; set bits 5,6,7 (to disable card/cartridge/expansion)
+    ; or #0xE0         ; set bits 5,6,7 (to disable card/cartridge/expansion)
+    or l             ; set these bits to disable medias/stuff
+    and h            ; reset these bits to enable medias/stuff
+
     out (#0x3E),a    ; do! (should have NO effect on a GameGear and on a Mark III)
 
     ld hl,#CART_CHECK_ADDR
@@ -300,19 +320,24 @@ cont:
   __endasm;
 }
 
-bool is_Port3E_effective (void) __naked {
+#pragma save
+#pragma disable_warning 85
+bool is_Port3E_effective (unsigned int masks) __naked __z88dk_fastcall {
   __asm
-    ld hl,#CART_CHECK_ADDR
-    ld de,#_temp_buf
-    ld bc,#CART_CHECK_SIZE
-    ldir                           ; copy some bytes from card/cartridge/expansion to RAM
-    ld hl,#_detect_Port3E_effectiveness
-    ld de,#_code_in_RAM
-    ld bc,#CODE_IN_RAM_SIZE
-    ldir                           ; copy code in RAM
+    push hl
+      ld hl,#CART_CHECK_ADDR
+      ld de,#_temp_buf
+      ld bc,#CART_CHECK_SIZE
+      ldir                           ; copy some bytes from card/cartridge/expansion to RAM
+      ld hl,#_detect_Port3E_match
+      ld de,#_code_in_RAM
+      ld bc,#CODE_IN_RAM_SIZE
+      ldir                           ; copy code in RAM
+    pop hl
     jp _code_in_RAM
   __endasm;
 }
+#pragma restore
 
 bool isJapanese (void) __naked {
   /* ==============================================================
@@ -357,25 +382,25 @@ bool paddle_detection (unsigned char which) __z88dk_fastcall __naked {
     ld bc,#0
     jr nz, detect_second_pad
 
-read:    
+read:
     in a,(#0xDC)
     and #0x20
     jr nz, skip_inc
     inc c
-    
+
 skip_inc:
     djnz read
     jr discriminate
-  
+
 detect_second_pad:
     in a,(#0xDD)
     and #08
     jr nz, skip_inc_2
     inc c
-    
+
 skip_inc_2:
     djnz detect_second_pad
-  
+
 discriminate:
     ld a,c
     ld l,#0     ; set false
@@ -393,15 +418,15 @@ unsigned char read_paddle (unsigned char which) __z88dk_fastcall __naked {
     ld a,l
     or a
     jr nz, read_second_pad
-  
-wait_5_reset:  
+
+wait_5_reset:
     in a,(#0xDC)
     bit 5,a
     jr nz, wait_5_reset     ; wait until bit 5 is 0
     and #0x0F
     ld l,a                  ; save lower 4 bits into l
-    
-wait_5_set:    
+
+wait_5_set:
     in a,(#0xDC)
     bit 5,a
     jr z, wait_5_set        ; wait until bit 5 is 1
@@ -413,7 +438,7 @@ wait_5_set:
     or l                    ; move to high nibble
     ld l,a                  ; together with lower part
     ret
-    
+
 read_second_pad:
     ld c,#0xDC
 
@@ -426,7 +451,7 @@ wait_3_reset:
     bit 3,a
     jr nz, wait_3_reset     ; wait until bit 5 is 0
     ld a,b
-    and #0xC0               ; save upper 2 bits 
+    and #0xC0               ; save upper 2 bits
     rlca
     rlca
     ld l,a                  ; into l (bits 0,1)
@@ -436,7 +461,7 @@ wait_3_reset:
     rlca
     or l                    ; together with l
     ld l,a                  ; into l (bits 2,3)
-    
+
 wait_3_set:
     in a,(#0xDD)            ; ensure we are reading both ports same moment
     ld e,a
@@ -446,7 +471,7 @@ wait_3_set:
     bit 3,a
     jr z, wait_3_set        ; wait until bit 5 is 1
     ld a,b
-    and #0xC0               ; save upper 2 bits 
+    and #0xC0               ; save upper 2 bits
     rrca
     rrca
     ld h,a                  ; into h (bits 4,5)
@@ -478,17 +503,18 @@ unsigned char detectVDPSpriteZoomCapabilities (void) {
   SMS_VRAMmemset (0x0000, 0xFF, 32);         // a 'full' tile
   SMS_useFirstHalfTilesforSprites(true);
   SMS_setSpriteMode (SPRITEMODE_ZOOMED);
-  
+
   SMS_initSprites();
   SMS_addSprite (0, 0, 0);    // first sprite
-  SMS_addSprite (15, 0, 0);   // second sprite, one pixel 'too' to the left
+  // SMS_addSprite (15, 0, 0);   // second sprite, one pixel 'too' to the left   // SMS I bug!!!
+  SMS_addSprite (0, 15, 0);   // second sprite, one pixel 'too' high
   SMS_waitForVBlank();           // wait VBlank
   SMS_copySpritestoSAT();        // copy sprites to SAT
   SMS_waitForVBlank();           // wait next VBlank...
   // ... and if it's a MD the collision flag will be OFF
   if (!(SMS_VDPFlags & VDPFLAG_SPRITECOLLISION))
     return (SZC_ABSENT);
-  
+
   SMS_initSprites();
   for (i=0;i<5;i++)
     SMS_addSprite (16*i, 0, 0);  // first 5 sprites, evenly spaced horizontally
@@ -531,8 +557,8 @@ void draw_footer_and_ver (void) {
     printf ("USA/BRA");                 // not Japanese and 60 Hz => USA/Brasil
   else if (TV_model & VDP_PAL)
     printf ("EUR/AUS");                 // not Japanese and 50 Hz => EUR/Australia
-  else
-    printf ("- ??? -");                 // not Japanese and undetected TV (this shouldn't happen with current detection routine)
+  //~ else
+    //~ printf ("- ??? -");                 // not Japanese and undetected TV (this shouldn't happen with current detection routine)
 
   // print TV mode
   printf (" TV:");
@@ -540,9 +566,9 @@ void draw_footer_and_ver (void) {
     printf ("50Hz (PAL) ");
   else if (TV_model & VDP_NTSC)
     printf ("60Hz (NTSC)");
-  else
-    printf ("undetected ");            // (this shouldn't happen with current detection routine)
-    
+  //~ else
+    //~ printf ("undetected ");            // (this shouldn't happen with current detection routine)
+
   // print if paddle is detected
   if (some_paddle_connected) {
     SMS_setNextTileatXY(FOOTER_COL,FOOTER_ROW-1);
@@ -612,7 +638,7 @@ void drop_shadow_striped_sprite (bool striped) {
   SMS_displayOff();
   SMS_initSprites();
   SMS_copySpritestoSAT();
-  SMS_loadPSGaidencompressedTiles (AlexKidd__tiles__psgcompr,0);
+  UNSAFE_SMS_loadZX7compressedTiles (AlexKidd__tiles__zx7,0);
   SMS_loadSTMcompressedTileMap (0,0,AlexKidd__tilemap__stmcompr);
   SMS_loadBGPalette(AlexKidd__palette__bin);
   if (striped) {
@@ -711,7 +737,7 @@ void video_tests (void) {
       pointer_anim=0;
 
     kp=filter_paddle(SMS_getKeysPressed());
-    
+
     if (kp & (PORT_A_KEY_UP|PORT_B_KEY_UP)) {        // UP
       if (cur_menu_item>0)
         cur_menu_item--;
@@ -791,7 +817,7 @@ void pad_tests (void) {
   SMS_displayOff();
   SMS_initSprites();
   SMS_copySpritestoSAT();
-  SMS_loadPSGaidencompressedTiles (pads__tiles__psgcompr,0);
+  UNSAFE_SMS_loadZX7compressedTiles (pads__tiles__zx7,0);
   SMS_loadSTMcompressedTileMap (0,0,pads__tilemap__stmcompr);
   for (i=0;i<15;i++)
     SMS_setBGPaletteColor(i,0x00);    // black
@@ -908,7 +934,7 @@ void paddle_test (bool stay_forever) {
   while(stay_forever || should_stay) {
     SMS_waitForVBlank();
     SMS_copySpritestoSAT();
-    
+
     SMS_initSprites();
     // read paddle controller knob position
     if (some_paddle_connected & 0x01) {
@@ -921,39 +947,39 @@ void paddle_test (bool stay_forever) {
       p2=read_paddle(1);
       SMS_addSprite(p2/2+58,180,0);  // cursor paddle 2
     }
-    
+
     // read paddle buttons
     kp=filter_paddle(SMS_getKeysPressed());
     kr=filter_paddle(SMS_getKeysReleased());
-    
+
     // press key
     if (kp & PORT_A_KEY_1)
       SMS_setBGPaletteColor(COLOR_PADDLE_A_1,HILIT_COLOR), stay_cnt=0;
     if (kp & PORT_B_KEY_1)
       SMS_setBGPaletteColor(COLOR_PADDLE_B_1,HILIT_COLOR), stay_cnt=0;
-      
+
     // release key
     if (kr & PORT_A_KEY_1)
       SMS_setBGPaletteColor(COLOR_PADDLE_A_1,BLACK), stay_cnt=0;
     if (kr & PORT_B_KEY_1)
-      SMS_setBGPaletteColor(COLOR_PADDLE_B_1,BLACK), stay_cnt=0;  
-    
+      SMS_setBGPaletteColor(COLOR_PADDLE_B_1,BLACK), stay_cnt=0;
+
     // moving paddle 1
     if ((MAX(p1,old_p1)-MIN(p1,old_p1))>PADDLE_THRESHOLD)
       SMS_setBGPaletteColor(COLOR_PADDLE_A,HILIT_COLOR), stay_cnt=0;
     else
       SMS_setBGPaletteColor(COLOR_PADDLE_A,BLACK);
-    
-    // moving paddle 2  
+
+    // moving paddle 2
     if ((MAX(p2,old_p2)-MIN(p2,old_p2))>PADDLE_THRESHOLD)
       SMS_setBGPaletteColor(COLOR_PADDLE_B,HILIT_COLOR), stay_cnt=0;
     else
       SMS_setBGPaletteColor(COLOR_PADDLE_B,BLACK);
-    
-    // if no action for 3 seconds, leave  
+
+    // if no action for 3 seconds, leave
     if (++stay_cnt>APPROX_3_SECS)
       should_stay=false;
-    
+
     // if PAUSE pressed, leave
     if (SMS_queryPauseRequested())
       SMS_resetPauseRequest(), should_stay=false;
@@ -969,7 +995,7 @@ void prepare_and_show_main_menu (void) {
 }
 
 void sysinfo (void) {
-  unsigned int sum8k;
+  unsigned int bios_sum;
   unsigned char i=0;
 
   SMS_initSprites();
@@ -991,17 +1017,19 @@ void sysinfo (void) {
     printf ("60Hz (NTSC)");               // 60 Hz
   else if (TV_model & VDP_PAL)
     printf ("50Hz (PAL) ");               // 50 Hz
-  else
-    printf ("*???*      ");               // undetected TV (?)
+  //~ else
+    //~ printf ("*???*      ");               // undetected TV (?)
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+4);
   printf (" MediaEnable?:%-3s ",(do_Port3E_works?"Yes":"No"));
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+5);
+  printf (" Z80 type?:%-4s   ",(CMOS_CPU?"CMOS":"NMOS"));
+  SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+6);
   if ((!is_MegaDrive) && (do_Port3E_works)) {   // if not MegaDrive and not GameGear and not Mark III
-    sum8k=get_BIOS_sum();
-    printf (" BIOS sum: 0x%04X ",sum8k);
-    SMS_setNextTileatXY(1,MENU_FIRST_ROW+7);
+    bios_sum=get_BIOS_sum(BIOS_SIZE_8K);
+    printf (" BIOS sum: 0x%04X ",bios_sum);
+    SMS_setNextTileatXY(1,MENU_FIRST_ROW+8);
     while (i<BIOSES_ITEMS) {
-      if (sum8k==BIOSes[i].sum8k) {
+      if (bios_sum==BIOSes[i].sum8k) {
         printf ("%-30s",BIOSes[i].name);
         break;
       }
@@ -1009,12 +1037,29 @@ void sysinfo (void) {
     }
     if (i==BIOSES_ITEMS)
       printf ("** unidentified BIOS found! **");
+  } else if (is_GameGear) {
+    if (has_BIOS_GG) {
+      bios_sum=get_BIOS_sum(BIOS_SIZE_1K);
+      printf (" BIOS sum: 0x%04X ",bios_sum);
+      SMS_setNextTileatXY(1,MENU_FIRST_ROW+8);
+      while (i<GG_BIOSES_ITEMS) {
+        if (bios_sum==GG_BIOSes[i].sum1k) {
+          printf ("%-30s",GG_BIOSes[i].name);
+          break;
+        }
+        i++;
+      }
+      if (i==GG_BIOSES_ITEMS)
+        printf ("** unidentified BIOS found! **");
+    } else {
+      printf (" No BIOS present  ");
+    }
   }
 
   for (;;) {
     SMS_waitForVBlank();
     kp=filter_paddle(SMS_getKeysPressed());
-      
+
     if (kp & (PORT_A_KEY_DOWN|PORT_B_KEY_DOWN)) {
       SMS_enableSRAM();
       dump_BIOS();
@@ -1025,12 +1070,40 @@ void sysinfo (void) {
   }
 }
 
+bool is_cmos_CPU (void) __naked {
+  __asm
+
+    ld hl,#0x4000
+    rst #0x08
+
+    dec c
+    .db 0xED, 0x71         ; out (c),#0
+
+    ld hl,#0x0000
+    rst #0x08
+
+    dec c
+    in a,(c)
+    jr nz, cmos
+
+    ld l,#0
+    ret
+
+cmos:
+    ld l,#1
+    ret
+  __endasm;
+}
+
 void main (void) {
   // detect region
   is_Japanese=isJapanese();
 
   // detect if Port3E features are present
-  do_Port3E_works=is_Port3E_effective();
+  do_Port3E_works=is_Port3E_effective(0xFFE0);   // OR 0xE0 (set bits 5,6,7 to disable card/cartridge/expansion), AND 0xFF (don't enable anything else)
+
+  // detect Z80 type
+  CMOS_CPU=is_cmos_CPU();
 
   // detect TV and console type using various means
   SMS_displayOn();
@@ -1039,9 +1112,13 @@ void main (void) {
   unsigned char ZoomCapabilities=detectVDPSpriteZoomCapabilities();
   is_MegaDrive=(ZoomCapabilities==SZC_ABSENT);
   has_new_VDP=(ZoomCapabilities==SZC_COMPLETE);
-  
+
+  is_GameGear=(!do_Port3E_works) && has_new_VDP;
+  if (is_GameGear)
+    has_BIOS_GG=is_Port3E_effective(0xF7E0);   // OR 0xE0 (set bits 5,6,7 to disable card/cartridge/expansion), AND 0xF7 (enable BIOS)
+
   SMS_displayOff();
-  
+
   some_paddle_connected=(paddle_detection(0))|(paddle_detection(1)<<1);
   main_menu_items=(some_paddle_connected)?MAIN_MENU_ITEMS:MAIN_MENU_ITEMS-1;
 
@@ -1050,7 +1127,7 @@ void main (void) {
   SMS_copySpritestoSAT();
   SMS_useFirstHalfTilesforSprites(false);
   SMS_setSpriteMode (SPRITEMODE_NORMAL);
-  
+
   if (some_paddle_connected==0x03)  // two paddles connected!
     paddle_test(true);              // show the paddle test until someone turns off the SMS and remove at least one of them!
 
@@ -1068,7 +1145,7 @@ void main (void) {
       pointer_anim=0;
 
     kp=filter_paddle(SMS_getKeysPressed());
-   
+
     if (kp & (PORT_A_KEY_UP|PORT_B_KEY_UP)) {        // UP
       if (cur_menu_item>0)
         cur_menu_item--;
@@ -1094,7 +1171,7 @@ void main (void) {
       prepare_and_show_main_menu();
       SMS_resetPauseRequest();
     }
-    
+
     // if PAUSE has been pressed, restart the ROM (after setting RAM location 0xC000 to what was initially)
     if (SMS_queryPauseRequested()) {
       SMS_displayOff();
