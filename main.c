@@ -692,6 +692,8 @@ void drop_shadow_striped_sprite (bool striped) {
       break;
   }
   SMS_displayOff();
+  SMS_initSprites();
+  SMS_copySpritestoSAT();
   SMS_setSpriteMode(SPRITEMODE_NORMAL);
 }
 
