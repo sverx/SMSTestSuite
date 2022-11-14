@@ -4,7 +4,7 @@
 ************************************************************************ */
 
 #define MAJOR_VER 0
-#define MINOR_VER 32
+#define MINOR_VER 33
 
 #define MIN(a,b)  (((a)<(b))?(a):(b))
 #define MAX(a,b)  (((a)>=(b))?(a):(b))
@@ -37,13 +37,14 @@ const unsigned char * const video_menu[VIDEO_MENU_ITEMS] = {"PLUGE",
                                                             "Drop Shadow",
                                                             "Striped sprite",
                                                             "[ back ]"};
-#define BIOSES_ITEMS 13
+#define BIOSES_ITEMS 15
 const struct {
   const unsigned int sum8k;
   const unsigned char * const name;
 } BIOSes[BIOSES_ITEMS] = {
   {0x9204,"Alex Kidd in Miracle World"},
-  {0x8738,"Hang On & Safari Hunt"},
+  {0x9ec6,"Hang On & Safari Hunt"},           // MPR 11459    (first version "Hang On & Safari Hunt")
+  {0x8738,"Hang On & Safari Hunt [A]"},       // MPR 11459-A  (amended "Hang On & Safari Hunt", revision 'A')
   {0x7f6f,"Hang On"},
   {0xde36,"Sonic the Hedgehog"},
   {0xf124,"Missile Defense 3-D"},
@@ -57,7 +58,8 @@ const struct {
 
   {0xdc4e,"Store Display Unit BIOS"},         // not sure this is really useful
 
-  {0x6ae3,"Emulicious (emulator) BIOS"}       //  ;)
+  {0x6ae3,"Emulicious (emulator) BIOS"},      //  ['old' BIOS]
+  {0x6bf7,"Emulicious (emulator) BIOS"}       //  [May 2022 BIOS]
 };
 
 #define GG_BIOSES_ITEMS 2
@@ -66,7 +68,7 @@ const struct {
   const unsigned char * const name;
 } GG_BIOSes[GG_BIOSES_ITEMS] = {
   {0x5e3a,"Majesco GameGear BIOS"},
-  {0x207e,"Emulicious (emulator) GG BIOS"}       //  ;)
+  {0x207e,"Emulicious (emulator) GG BIOS"}    //  ;)
 };
 
 #define MENU_FIRST_ROW  8
@@ -141,7 +143,7 @@ unsigned char temp_buf[TEMP_BUF_SIZE];
 
 /*  **************** [[[ CODE ]]] ************************** */
 
-unsigned int compute_BIOS_sum (void) __naked {
+unsigned int compute_BIOS_sum (void) __naked __z88dk_fastcall {
   /* *************************
      NOTE: this code will be copied to RAM and run from there!
      *************************  */
@@ -281,7 +283,7 @@ void dump_BIOS (void) __naked {
   __endasm;
 }
 
-unsigned char detect_Port3E_match (void)  __naked {
+unsigned char detect_Port3E_match (void)  __naked __z88dk_fastcall {
   /* *************************
      NOTE: this code will be copied to RAM and run from there!
      *************************  */
@@ -339,7 +341,7 @@ bool is_Port3E_effective (unsigned int masks) __naked __z88dk_fastcall {
 }
 #pragma restore
 
-bool isJapanese (void) __naked {
+bool isJapanese (void) __naked __z88dk_fastcall {
   /* ==============================================================
    Region detector
    Returns 1 for Japanese, 0 for export
@@ -375,7 +377,7 @@ _IsJap:
 
 #pragma save
 #pragma disable_warning 85
-bool paddle_detection (unsigned char which) __z88dk_fastcall __naked {
+bool paddle_detection (unsigned char which) __naked __z88dk_fastcall {
   __asm
     ld a,l
     or a
@@ -413,7 +415,7 @@ discriminate:
   __endasm;
 }
 
-unsigned char read_paddle (unsigned char which) __z88dk_fastcall __naked {
+unsigned char read_paddle (unsigned char which) __naked __z88dk_fastcall {
   __asm
     ld a,l
     or a
@@ -505,28 +507,26 @@ unsigned char detectVDPSpriteZoomCapabilities (void) {
   SMS_setSpriteMode (SPRITEMODE_ZOOMED);
 
   SMS_initSprites();
-  SMS_addSprite (0, 0, 0);    // first sprite
-  // SMS_addSprite (15, 0, 0);   // second sprite, one pixel 'too' to the left   // SMS I bug!!!
-  SMS_addSprite (0, 15, 0);   // second sprite, one pixel 'too' high
+  SMS_addSprite (0, 0, 0);       // first sprite
+  SMS_addSprite (0, 15, 0);      // second sprite, one pixel 'too' high (will overlap 1st sprite only if zooming is supported at all)
   SMS_waitForVBlank();           // wait VBlank
   SMS_copySpritestoSAT();        // copy sprites to SAT
   SMS_waitForVBlank();           // wait next VBlank...
   // ... and if it's a MD the collision flag will be OFF
   if (!(SMS_VDPFlags & VDPFLAG_SPRITECOLLISION))
-    return (SZC_ABSENT);
+    return (SZC_ABSENT);         // sprite zoom absent (315-5313) ['Genesis/MegaDrive']
 
   SMS_initSprites();
-  for (i=0;i<5;i++)
-    SMS_addSprite (16*i, 0, 0);  // first 5 sprites, evenly spaced horizontally
-  SMS_addSprite (16*i-1, 0, 0);  // 6th sprite, one pixel 'too' to the left (will overlap 5th sprite if it has been correctly zoomed)
+  SMS_addSprite (0, 0, 0);       // first sprite
+  SMS_addSprite (15, 0, 0);      // second sprite, one pixel 'too' to the left (will overlap 1st sprite if it has been correctly zoomed horizontally)
   SMS_waitForVBlank();           // wait VBlank
   SMS_copySpritestoSAT();        // copy sprites to SAT
   SMS_waitForVBlank();           // wait next VBlank...
   // ... and if it's a fixed VDP the collision flag will be ON
   if (SMS_VDPFlags & VDPFLAG_SPRITECOLLISION)
-    return(SZC_COMPLETE);   // sprite zoom fully working
+    return(SZC_COMPLETE);   // sprite zoom fully working  (315-5246 or 315-5378) ['SMS II' or 'GameGear']
   else
-    return(SZC_PARTIAL);    // zoom bugged
+    return(SZC_PARTIAL);    // sprite zoom partially working (315-5124) ['SMS']
 }
 
 void draw_footer_and_ver (void) {
@@ -1003,14 +1003,21 @@ void sysinfo (void) {
 
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW);
   printf (" Hardware tests ");
+
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+1);
   printf (" JPN?:%-3s     ",(is_Japanese?"Yes":"No"));
+
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+2);
   printf (" VDP?:");
   if (is_MegaDrive)
     printf ("315-5313");
+  else if (is_GameGear)
+    printf ("315-5378");
+  else if (has_new_VDP)
+    printf ("315-5246");
   else
-    printf ("%s",(has_new_VDP?"315-5246":"315-5124"));
+    printf ("315-5124");
+
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+3);
   printf (" TV? :");
   if (TV_model & VDP_NTSC)
@@ -1019,10 +1026,13 @@ void sysinfo (void) {
     printf ("50Hz (PAL) ");               // 50 Hz
   //~ else
     //~ printf ("*???*      ");               // undetected TV (?)
+
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+4);
   printf (" MediaEnable?:%-3s ",(do_Port3E_works?"Yes":"No"));
+
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+5);
   printf (" Z80 type?:%-4s   ",(CMOS_CPU?"CMOS":"NMOS"));
+
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+6);
   if ((!is_MegaDrive) && (do_Port3E_works)) {   // if not MegaDrive and not GameGear and not Mark III
     bios_sum=get_BIOS_sum(BIOS_SIZE_8K);
