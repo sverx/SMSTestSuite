@@ -4,7 +4,7 @@
 ************************************************************************ */
 
 #define MAJOR_VER 0
-#define MINOR_VER 33
+#define MINOR_VER 34
 
 #define MIN(a,b)  (((a)<(b))?(a):(b))
 #define MAX(a,b)  (((a)>=(b))?(a):(b))
@@ -81,7 +81,9 @@ unsigned char cur_menu_item, main_menu_items, pointer_anim;
 
 /* hardware tests results */
 unsigned char TV_model;
-bool is_MegaDrive, is_GameGear, has_BIOS_GG, is_Japanese, has_new_VDP, do_Port3E_works, CMOS_CPU;
+bool is_Japanese, has_new_VDP, do_Port3E_works, has_CMOS_CPU;
+bool is_MegaDrive, is_GameGear;
+bool has_BIOS_GG, has_2ASIC_GG;
 unsigned char some_paddle_connected;
 
 /* VDP sprite zoom capabilities */
@@ -141,7 +143,148 @@ unsigned char temp_buf[TEMP_BUF_SIZE];
 #define BIOS_SIZE_8K   0x20
 #define BIOS_SIZE_1K   0x04
 
+/*  ******** for GameGear Twin Asic detection *************  */
+
+#define VDP_CTRL_PORT  0xbf
+#define VDP_DATA_PORT  0xbe
+
+#define VRAM_AREA_READ_ADDRESS   (0x3800+32*24*2)
+#define VRAM_AREA_WRTE_ADDRESS   (0x4000+VRAM_AREA_READ_ADDRESS)
+#define VRAM_XFER_LENGTH_BYTES   256
+#define VRAM_XFER_LENGTH_DWORDS  (VRAM_XFER_LENGTH_BYTES/4)
+#define VRAM_DATA_1ST_BYTE       0xAA
+#define VRAM_DATA_2ND_BYTE       0x55
+#define VRAM_DATA_3RD_BYTE       0x12
+#define VRAM_DATA_4TH_BYTE       0xED
+#define VRAM_DATA_DWORD          (((unsigned long)VRAM_DATA_4TH_BYTE << 24)|((unsigned long)VRAM_DATA_3RD_BYTE << 16)|((unsigned long)VRAM_DATA_2ND_BYTE << 8)|(unsigned long)VRAM_DATA_1ST_BYTE)
+#define RAM_CODE_SIZE            128
+
+unsigned long ram_buffer[VRAM_XFER_LENGTH_DWORDS];
+
 /*  **************** [[[ CODE ]]] ************************** */
+
+unsigned char check_VRAM_contents (void) __naked __z88dk_fastcall {
+  __asm
+    ld hl,#VRAM_AREA_READ_ADDRESS   ; read from VRAM
+
+    ld c,#VDP_CTRL_PORT             ; set VDP Control Port
+    di                              ; make it interrupt SAFE
+    out (c),l
+    out (c),h
+    ei
+
+    ld b,#VRAM_XFER_LENGTH_DWORDS
+    ld c,#VDP_DATA_PORT
+    ld l,#1                         ; report error
+
+_loopRead:
+    nop
+    nop
+    nop
+    nop
+
+    nop
+    nop
+    nop
+    nop                             ; 32 cycles wait
+
+    in a,(c)
+    cp #VRAM_DATA_1ST_BYTE
+    ret nz
+
+    nop
+    nop
+    nop
+    nop
+
+    nop
+    nop
+    nop
+    nop                             ; 32 cycles wait
+
+    in a,(c)
+    cp #VRAM_DATA_2ND_BYTE
+    ret nz
+
+    nop
+    nop
+    nop
+    nop
+
+    nop
+    nop
+    nop
+    nop                             ; 32 cycles wait
+
+    in a,(c)
+    cp #VRAM_DATA_3RD_BYTE
+    ret nz
+
+    nop
+    nop
+    nop
+    nop
+
+    nop
+    nop
+    nop
+    nop                             ; 32 cycles wait
+
+    in a,(c)
+    cp #VRAM_DATA_4TH_BYTE
+    ret nz
+
+    djnz _loopRead
+    ld l,#0                         ; report OK
+    ret
+  __endasm;
+}
+
+void copy_VRAM_26 (void) __naked {
+  __asm
+    ld hl,#VRAM_AREA_WRTE_ADDRESS   ; write to VRAM
+    ld c, #0xBF                     ; set VDP Control Port
+    di                              ; make it interrupt SAFE
+    out (c),l
+    out (c),h
+    ei                              ; 4
+
+    ld hl,#_ram_buffer              ; 10
+    ld b,#VRAM_XFER_LENGTH_BYTES/2  ; 7
+    ld c,#0xBE                      ; 7  = 28  ( > 26 )
+    di
+
+_loop_copy_26:
+    outi                            ; 16
+    jp nz,_loop_copy_26             ; 10 = 26
+
+    ld b,#VRAM_XFER_LENGTH_BYTES/2  ; 7 - the delay between halves must be an ODD number of cycles
+
+_loop_copy_26_again:
+    outi                            ; 16
+    jp nz,_loop_copy_26_again       ; 10 = 26
+
+    ei
+    ret
+  __endasm;
+}
+
+bool is_TwinAsic_GG (void) {
+  unsigned char i,count;
+  for (i=0;i<VRAM_XFER_LENGTH_DWORDS;i++)
+    ram_buffer[i]=VRAM_DATA_DWORD;
+
+  SMS_waitForVBlank();
+  SMS_VRAMmemset(VRAM_AREA_WRTE_ADDRESS, 0x00, VRAM_XFER_LENGTH_BYTES);
+
+  // make sure we're drawing the screen the moment we run the test
+  do
+    count=SMS_getVCount();
+  while ((count<64) || (count>=160));
+
+  copy_VRAM_26();
+  return (check_VRAM_contents());
+}
 
 unsigned int compute_BIOS_sum (void) __naked __z88dk_fastcall {
   /* *************************
@@ -535,17 +678,21 @@ void draw_footer_and_ver (void) {
   SMS_setNextTileatXY(FOOTER_COL,FOOTER_ROW);
   printf (" Model:");
   if (is_MegaDrive)
-      printf ("Genesis/MegaDrive      ");
+        printf ("Genesis/MegaDrive      ");
   else if (do_Port3E_works) {
     if (has_new_VDP)
-      printf ("Master System II       ");
+        printf ("Master System II       ");
     else
-      printf ("Master System          ");
-  } else {                               //   !do_Port3E_works
-    if (has_new_VDP)
-      printf ("Game Gear              ");    // no port3E support, new VDP
+        printf ("Master System          ");
+  } else {                                     //   !do_Port3E_works
+    if (has_new_VDP) {
+      if (has_2ASIC_GG)
+        printf ("Game Gear (Twin ASICs) ");    // no port3E support, new VDP, Two ASICs
+      else
+        printf ("Game Gear (Single ASIC)");    // no port3E support, new VDP, One ASIC
+    }
     else
-      printf ("Mark III               ");    // no port3E support, old VDP
+        printf ("Mark III               ");    // no port3E support, old VDP
   }
 
   // print region
@@ -1033,13 +1180,19 @@ void sysinfo (void) {
   printf (" MediaEnable?:%-3s ",(do_Port3E_works?"Yes":"No"));
 
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+5);
-  printf (" Z80 type?:%-4s   ",(CMOS_CPU?"CMOS":"NMOS"));
+  printf (" Z80 type?:%-4s   ",(has_CMOS_CPU?"CMOS":"NMOS"));
 
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+6);
+  if (is_GameGear)
+    printf (" Twin ASIC?:%-3s   ",(has_2ASIC_GG?"Yes":"No"));
+  else
+    printf ("                  ");
+
+  SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+7);
   if ((!is_MegaDrive) && (do_Port3E_works)) {   // if not MegaDrive and not GameGear and not Mark III
     bios_sum=get_BIOS_sum(BIOS_SIZE_8K);
     printf (" BIOS sum: 0x%04X ",bios_sum);
-    SMS_setNextTileatXY(1,MENU_FIRST_ROW+8);
+    SMS_setNextTileatXY(1,MENU_FIRST_ROW+9);
     while (i<BIOSES_ITEMS) {
       if (bios_sum==BIOSes[i].sum8k) {
         printf ("%-30s",BIOSes[i].name);
@@ -1053,7 +1206,7 @@ void sysinfo (void) {
     if (has_BIOS_GG) {
       bios_sum=get_BIOS_sum(BIOS_SIZE_1K);
       printf (" BIOS sum: 0x%04X ",bios_sum);
-      SMS_setNextTileatXY(1,MENU_FIRST_ROW+8);
+      SMS_setNextTileatXY(1,MENU_FIRST_ROW+9);
       while (i<GG_BIOSES_ITEMS) {
         if (bios_sum==GG_BIOSes[i].sum1k) {
           printf ("%-30s",GG_BIOSes[i].name);
@@ -1115,19 +1268,23 @@ void main (void) {
   do_Port3E_works=is_Port3E_effective(0xFFE0);   // OR 0xE0 (set bits 5,6,7 to disable card/cartridge/expansion), AND 0xFF (don't enable anything else)
 
   // detect Z80 type
-  CMOS_CPU=is_cmos_CPU();
+  has_CMOS_CPU=is_cmos_CPU();
 
   // detect TV and console type using various means
   SMS_displayOn();
   TV_model=SMS_VDPType();
-  //has_new_VDP=newVDP();
   unsigned char ZoomCapabilities=detectVDPSpriteZoomCapabilities();
   is_MegaDrive=(ZoomCapabilities==SZC_ABSENT);
   has_new_VDP=(ZoomCapabilities==SZC_COMPLETE);
 
+  // infer if this is a GameGear from the results of previous tests
   is_GameGear=(!do_Port3E_works) && has_new_VDP;
-  if (is_GameGear)
+
+  // if this is a GameGear, check if it has a BIOS and if it's the older Twin ASIC model
+  if (is_GameGear) {
     has_BIOS_GG=is_Port3E_effective(0xF7E0);   // OR 0xE0 (set bits 5,6,7 to disable card/cartridge/expansion), AND 0xF7 (enable BIOS)
+    has_2ASIC_GG=is_TwinAsic_GG();
+  }
 
   SMS_displayOff();
 

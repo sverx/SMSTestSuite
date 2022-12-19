@@ -66,7 +66,7 @@ You can test your SEGA Master System and SEGA MegaDrive/Genesis (*port A only*) 
 
 ### Paddle Tests
 
-You can test your SEGA Master System (Japanese) Paddle(s) in either port. If the knob isn't rotated or paddle key is not pressed/held/released in approx 3 seconds the test will end. PAUSE will also end the test. If paddle wasn't connected when the Test Suite started, you can connect that while in the main menu and press PAUSE to restart it, to have that detected. If two paddles are connected when the Test Suite starts, paddle test will be run immediatelym but it won't be possible to leave the test.
+You can test your SEGA Master System (Japanese) Paddle(s) in either port. If the knob isn't rotated or paddle key is not pressed/held/released in approx 3 seconds the test will end. PAUSE will also end the test. If paddle wasn't connected when the Test Suite started, you can connect that while in the main menu and press PAUSE to restart it, to have that detected. If two paddles are connected when the Test Suite starts, paddle test will be run immediately but it won't be possible to leave the test.
 
 ### System Info
 
@@ -75,7 +75,10 @@ You can read some info about your system. In detail:
 * The result of a detection routine that tests if your console is a Japanese one or an 'import' one (USA/Europe).
 * The result of the VDP type detection routine: first revision SEGA Master System should have a 315-5124 chip while the newer SEGA Master System II should have a 315-5246 chip. Note that this is not always true.
 * The result of the TV type detection routine: either 50Hz (PAL) or 60Hz (NTSC).
-* The result of a detection routine that tests if your console is a SEGA Game Gear.
-* The 16-bit checksum of the first 8 KB of the console BIOS contents (only if it's not a SEGA Game Gear). This is used to identify the BIOS in the machine, and informations will be printed in the lower part of the screen.
+* The result of a detection routine that tests if your console is a SEGA Game Gear (plus the result of a detection routine that tests if it's a Twin ASIC model Game Gear).
+* The 16-bit checksum of the first 8 KB of the console BIOS contents. This is used to identify the BIOS in the machine, and informations will be printed in the lower part of the screen.
+
 If "unidentified BIOS found!" is printed, please let us know here -> http://www.smspower.org/forums/
+
 Also, pressing the DOWN key on the pad, the first 16 KB of the BIOS contents will be saved to SRAM, if your cartridge supports that (Krikzz's Master EverDrive's users will find a SAV file in their SD cards only after dumping the SRAM to SD, which happens when you load a new ROM to the cart).
+
