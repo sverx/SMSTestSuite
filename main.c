@@ -4,7 +4,7 @@
 ************************************************************************ */
 
 #define MAJOR_VER 0
-#define MINOR_VER 34
+#define MINOR_VER 35
 
 #define MIN(a,b)  (((a)<(b))?(a):(b))
 #define MAX(a,b)  (((a)>=(b))?(a):(b))
@@ -669,7 +669,7 @@ unsigned char detectVDPSpriteZoomCapabilities (void) {
   if (SMS_VDPFlags & VDPFLAG_SPRITECOLLISION)
     return(SZC_COMPLETE);   // sprite zoom fully working  (315-5246 or 315-5378) ['SMS II' or 'GameGear']
   else
-    return(SZC_PARTIAL);    // sprite zoom partially working (315-5124) ['SMS']
+    return(SZC_PARTIAL);    // sprite zoom partially working (315-5124) ['SMS' or 'Mark III']
 }
 
 void draw_footer_and_ver (void) {
@@ -756,12 +756,12 @@ unsigned int filter_paddle(unsigned int value) {
   return (value);
 }
 
-void static_screen (void* tiles, void* tilemap, void* palette, void* alt_tiles) {
-  bool alt=false;
+void static_screen (void* tiles, void* tilemap, void* palette, void* alt_tiles, void* alt_tiles_2) {
+  unsigned char alt=0;
   SMS_displayOff();
   SMS_initSprites();
   SMS_copySpritestoSAT();
-  SMS_loadPSGaidencompressedTiles (tiles,0);
+  SMS_loadPSGaidencompressedTiles(tiles,0);
   SMS_loadSTMcompressedTileMap (0,0,tilemap);
   SMS_loadBGPalette(palette);
   SMS_displayOn();
@@ -770,11 +770,25 @@ void static_screen (void* tiles, void* tilemap, void* palette, void* alt_tiles) 
     kp=filter_paddle(SMS_getKeysPressed());
     if (kp & (PORT_A_KEY_2|PORT_B_KEY_2))
       break;
-    if (kp & (PORT_A_KEY_1|PORT_B_KEY_1))
+    if (kp & (PORT_A_KEY_1|PORT_B_KEY_1)) {
       if (alt_tiles==NULL)
         break;
-      else
-        alt=!alt, SMS_loadPSGaidencompressedTiles (((alt)?alt_tiles:tiles),0);
+      else {
+        if (++alt==((alt_tiles_2==NULL)?2:3))
+          alt=0;
+        switch (alt) {
+          case 0:
+            SMS_loadPSGaidencompressedTiles(tiles,0);
+            break;
+          case 1:
+            SMS_loadPSGaidencompressedTiles(alt_tiles,0);
+            break;
+          default:
+            SMS_loadPSGaidencompressedTiles(alt_tiles_2,0);
+            break;
+        }
+      }
+    }
   }
   SMS_displayOff();
 }
@@ -785,7 +799,7 @@ void drop_shadow_striped_sprite (bool striped) {
   SMS_displayOff();
   SMS_initSprites();
   SMS_copySpritestoSAT();
-  UNSAFE_SMS_loadZX7compressedTiles (AlexKidd__tiles__zx7,0);
+  SMS_loadZX7compressedTiles (AlexKidd__tiles__zx7,0);
   SMS_loadSTMcompressedTileMap (0,0,AlexKidd__tilemap__stmcompr);
   SMS_loadBGPalette(AlexKidd__palette__bin);
   if (striped) {
@@ -903,18 +917,18 @@ void video_tests (void) {
     }
     if (kp & (PORT_A_KEY_1|PORT_A_KEY_2|PORT_B_KEY_1|PORT_B_KEY_2)) {
       switch (cur_menu_item) {
-        case 0:static_screen(PLUGE__tiles__psgcompr,PLUGE__tilemap__stmcompr,PLUGE__palette__bin,NULL); break;
-        case 1:static_screen(color_bars__tiles__psgcompr,color_bars__tilemap__stmcompr,color_bars__palette__bin,NULL); break;
-        case 2:static_screen(color_bleed__tiles__psgcompr,color_bleed__tilemap__stmcompr,color_bars__palette__bin,color_bleed2__tiles__psgcompr); break;
-        case 3:static_screen(grid__tiles__psgcompr,grid__tilemap__stmcompr,grid__palette__bin,NULL); break;
-        case 4:static_screen(stripes__tiles__psgcompr,fullscreen__tilemap__stmcompr,bw_palette_bin,checkerboard__tiles__psgcompr); break;
+        case 0:static_screen(PLUGE__tiles__psgcompr,PLUGE__tilemap__stmcompr,PLUGE__palette__bin,NULL,NULL); break;
+        case 1:static_screen(color_bars__tiles__psgcompr,color_bars__tilemap__stmcompr,color_bars__palette__bin,NULL,NULL); break;
+        case 2:static_screen(color_bleed__tiles__psgcompr,color_bleed__tilemap__stmcompr,color_bars__palette__bin,color_bleed2__tiles__psgcompr,NULL); break;
+        case 3:static_screen(grid__tiles__psgcompr,grid__tilemap__stmcompr,grid__palette__bin,NULL,NULL); break;
+        case 4:static_screen(stripes__tiles__psgcompr,fullscreen__tilemap__stmcompr,bw_palette_bin,v_stripes__tiles__psgcompr,checkerboard__tiles__psgcompr); break;
         case 5:fullscreen(); break;
         case 6:if ((!is_MegaDrive) && (!do_Port3E_works) && (has_new_VDP))  // if it's a GameGear
-                 static_screen(linearity_GG__tiles__psgcompr,linearity_GG__tilemap__stmcompr,linearity__palette__bin,NULL);
+                 static_screen(linearity_GG__tiles__psgcompr,linearity_GG__tilemap__stmcompr,linearity__palette__bin,NULL,NULL);
                else if (TV_model & VDP_PAL)
-                 static_screen(linearity_PAL__tiles__psgcompr,linearity_PAL__tilemap__stmcompr,linearity__palette__bin,NULL);
+                 static_screen(linearity_PAL__tiles__psgcompr,linearity_PAL__tilemap__stmcompr,linearity__palette__bin,NULL,NULL);
                else
-                 static_screen(linearity_NTSC__tiles__psgcompr,linearity_NTSC__tilemap__stmcompr,linearity__palette__bin,NULL);
+                 static_screen(linearity_NTSC__tiles__psgcompr,linearity_NTSC__tilemap__stmcompr,linearity__palette__bin,NULL,NULL);
                break;
         case 7:drop_shadow_striped_sprite(false);break;
         case 8:drop_shadow_striped_sprite(true);break;
@@ -966,7 +980,7 @@ void pad_tests (void) {
   SMS_displayOff();
   SMS_initSprites();
   SMS_copySpritestoSAT();
-  UNSAFE_SMS_loadZX7compressedTiles (pads__tiles__zx7,0);
+  SMS_loadZX7compressedTiles (pads__tiles__zx7,0);
   SMS_loadSTMcompressedTileMap (0,0,pads__tilemap__stmcompr);
   for (i=0;i<15;i++)
     SMS_setBGPaletteColor(i,0x00);    // black
