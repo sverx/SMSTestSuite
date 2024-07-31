@@ -426,7 +426,7 @@ void dump_BIOS (void) __naked {
   __endasm;
 }
 
-unsigned char detect_Port3E_match (void)  __naked __z88dk_fastcall {
+unsigned char detect_Port3E_match (void) __naked __z88dk_fastcall {
   /* *************************
      NOTE: this code will be copied to RAM and run from there!
      *************************  */
@@ -1249,7 +1249,7 @@ void sysinfo (void) {
   }
 }
 
-bool is_cmos_CPU (void) __naked {
+bool is_cmos_CPU (void) __naked __z88dk_fastcall {
   __asm
 
     ld hl,#0x4000
