@@ -37,7 +37,14 @@ const unsigned char * const video_menu[VIDEO_MENU_ITEMS] = {"PLUGE",
                                                             "Drop Shadow",
                                                             "Striped sprite",
                                                             "[ back ]"};
-#define BIOSES_ITEMS 15
+
+#define AUDIO_MENU_ITEMS  4
+const unsigned char * const audio_menu[AUDIO_MENU_ITEMS] = {"PSG chip audio",
+                                                            "FM chip audio",
+                                                            "Combined audio",
+                                                            "[ back ]"};
+
+#define BIOSES_ITEMS 14
 const struct {
   const unsigned int sum8k;
   const unsigned char * const name;
@@ -58,8 +65,7 @@ const struct {
 
   {0xdc4e,"Store Display Unit BIOS"},         // not sure this is really useful
 
-  {0x6ae3,"Emulicious (emulator) BIOS"},      //  ['old' BIOS]
-  {0x6bf7,"Emulicious (emulator) BIOS"}       //  [May 2022 BIOS]
+  {0x251c,"Emulicious (emulator) BIOS"}       // (accurate at 11 Nov 2024)
 };
 
 #define GG_BIOSES_ITEMS 2
@@ -84,6 +90,7 @@ unsigned char TV_model;
 bool is_Japanese, has_new_VDP, do_Port3E_works, has_CMOS_CPU;
 bool is_MegaDrive, is_GameGear;
 bool has_BIOS_GG, has_2ASIC_GG;
+unsigned char FMfeatures;
 unsigned char some_paddle_connected;
 
 /* VDP sprite zoom capabilities */
@@ -160,6 +167,18 @@ unsigned char temp_buf[TEMP_BUF_SIZE];
 #define RAM_CODE_SIZE            128
 
 unsigned long ram_buffer[VRAM_XFER_LENGTH_DWORDS];
+
+/*  ******** for FM audio chip detection *************  */
+
+// possible detection results are:
+#define SMS_AUDIO_NO_FM    0
+#define SMS_AUDIO_FM_ONLY  1
+#define SMS_AUDIO_FM_PSG   2
+
+#define SMS_ENABLE_AUDIO_FM_ONLY   0x01
+#define SMS_ENABLE_AUDIO_FM_PSG    0x03
+#define SMS_ENABLE_AUDIO_PSG_ONLY  0x00
+#define SMS_ENABLE_AUDIO_NONE      0x02
 
 /*  **************** [[[ CODE ]]] ************************** */
 
@@ -673,7 +692,6 @@ unsigned char detectVDPSpriteZoomCapabilities (void) {
 }
 
 void draw_footer_and_ver (void) {
-
   // print console model
   SMS_setNextTileatXY(FOOTER_COL,FOOTER_ROW);
   printf (" Model:");
@@ -722,10 +740,15 @@ void draw_footer_and_ver (void) {
     printf (" Paddle Control found in [%c]  ",(some_paddle_connected==0x01)?'1':'2');
   }
 
+  // print if FM chip is detected
+  if (FMfeatures!=SMS_AUDIO_NO_FM) {
+    SMS_setNextTileatXY(FOOTER_COL+2,FOOTER_ROW-2);
+    printf (" FM audio chip detected! ");
+  }
+
   // print program version (just under the title)
   SMS_setNextTileatXY(3,4);
   printf ("ver %d.%2d",MAJOR_VER,MINOR_VER);
-
 }
 
 void draw_menu (unsigned char *menu[], unsigned int max) {
@@ -944,7 +967,7 @@ void video_tests (void) {
   cur_menu_item=0,pointer_anim=0;
 }
 
-void audio_test (void) {
+void PSG_audio_test (void) {
   SMS_displayOff();
   SMS_initSprites();
   SMS_copySpritestoSAT();
@@ -971,6 +994,53 @@ void audio_test (void) {
       break;
   }
   PSGStop();
+}
+
+void audio_tests_menu(void) {
+  bool go_back=false;
+  draw_menu(audio_menu, AUDIO_MENU_ITEMS);
+  draw_footer_and_ver();
+  cur_menu_item=0,pointer_anim=0;
+  while (!go_back) {
+    SMS_initSprites();
+    SMS_addSprite(MENU_FIRST_COL*8+(pointer_anim/8),(MENU_FIRST_ROW+cur_menu_item)*8,0);
+    SMS_waitForVBlank();
+    SMS_copySpritestoSAT();
+
+    if ((++pointer_anim)==7*8)
+      pointer_anim=0;
+
+    kp=filter_paddle(SMS_getKeysPressed());
+
+    if (kp & (PORT_A_KEY_UP|PORT_B_KEY_UP)) {        // UP
+      if (cur_menu_item>0)
+        cur_menu_item--;
+      else
+        cur_menu_item=AUDIO_MENU_ITEMS-1;
+      pointer_anim=0;
+    }
+    if (kp & (PORT_A_KEY_DOWN|PORT_B_KEY_DOWN)) {    // DOWN
+      if (cur_menu_item<(AUDIO_MENU_ITEMS-1))
+        cur_menu_item++;
+      else
+        cur_menu_item=0;
+      pointer_anim=0;
+    }
+    if (kp & (PORT_A_KEY_1|PORT_A_KEY_2|PORT_B_KEY_1|PORT_B_KEY_2)) {
+      switch (cur_menu_item) {
+        case 0: PSG_audio_test(); go_back=true; break;
+        case 1: /* FM_audio_test(); */ break;
+        case 2: /* combined_audio_test(); */ break;
+        case AUDIO_MENU_ITEMS-1:go_back=true; break;
+      }
+      if (!go_back) {
+        load_menu_assets();
+        draw_menu(audio_menu, AUDIO_MENU_ITEMS);
+        draw_footer_and_ver();
+      }
+    }
+  }
+  cur_menu_item=0,pointer_anim=0;
 }
 
 void pad_tests (void) {
@@ -1274,9 +1344,98 @@ cmos:
   __endasm;
 }
 
+// from MBMlib:
+unsigned char SMS_GetFMAudioCapabilities (void) __naked {
+  __asm
+
+    ; first we need to perform region detection
+    ; as devkitSMS currently does NOT support that :|
+
+    ld a, #0b11110101               ; Output 1s on both TH lines
+    out (#0x3f), a
+    in a, (#0xdd)
+    and #0b11000000                 ; See what the TH inputs are
+    cp #0b11000000                  ; If the input does not match the output then it is a Japanese system
+    jp nz, _IsJapanese
+
+    ld a, #0b01010101               ; Output 0s on both TH lines
+    out (#0x3f), a
+    in a, (#0xdd)
+    and #0b11000000                 ; See what the TH inputs are
+    jp nz, _IsJapanese              ; If the input does not match the output then it is a Japanese system
+
+    ld a, #0b11111111               ; Set everything back to being inputs
+    out (#0x3f), a
+
+    ld e, #1                        ; store export = 1 in E
+    jr _getAudioCap
+
+_IsJapanese:
+    ld e, #0                        ; store export = 0 in E
+
+_getAudioCap:
+    ld a, (_SMS_Port3EBIOSvalue)
+    or #0x04                        ; disable I/O chip
+    out (#0x3E), a
+
+    ld bc, #0                       ; reset counters
+
+_next:
+    ld a, b
+    out (#0xF2), a                  ; output to the audio control port
+
+    in a, (#0xF2)                   ; read back
+    and #0b00000011                 ; mask to bits 0-1 only
+    cp b                            ; check what is read is the same as what was written
+    jr nz, _noinc
+
+    inc c                           ; c = # of times the result is the same
+
+_noinc:
+    inc b                           ; increase counter
+    bit 2, b                        ; repeated four times?
+    jr z, _next                     ; no? then repeat again
+
+    ld a, (_SMS_Port3EBIOSvalue)
+    out (#0x3E), a                  ; turn I/O chip back on
+
+    srl c                           ; 4 --> 2; 3, 2 --> 1; 0, 1 --> 0
+    ld a, c
+    bit 0, c                        ; check if PSG+FM (Japanese SMS) or PSG only
+    ret z                           ; yes? then transfer value directly
+
+    add a,e                         ; else check region: if Region = 1 (Export)
+                                    ; then 1 --> 2 (3rd party FM board);
+                                    ; else 1 stays 1 unchanged (Mark III + FM unit)
+_done:
+    ret                             ; return FM type
+  __endasm;
+}
+
+#pragma save
+#pragma disable_warning 85
+void SMS_EnableAudio (unsigned char chips) __z88dk_fastcall __naked {
+  __asm
+  ld a, (_SMS_Port3EBIOSvalue)
+  or #0x04                        ; disable I/O chip
+  out (#0x3E), a
+
+  ld a, l
+  out (#0xF2), a                  ; output to the audio control port
+
+  ld a, (_SMS_Port3EBIOSvalue)
+  out (#0x3E), a                  ; turn I/O chip back on
+  ret
+  __endasm;
+}
+#pragma restore
+
 void main (void) {
   // detect region
   is_Japanese=isJapanese();
+
+  // detect FM capabilities
+  FMfeatures=SMS_GetFMAudioCapabilities();
 
   // detect if Port3E features are present
   do_Port3E_works=is_Port3E_effective(0xFFE0);   // OR 0xE0 (set bits 5,6,7 to disable card/cartridge/expansion), AND 0xFF (don't enable anything else)
@@ -1343,10 +1502,14 @@ void main (void) {
         cur_menu_item=0;
       pointer_anim=0;
     }
-    if (kp & (PORT_A_KEY_1|PORT_B_KEY_1)) {
+    if (kp & (PORT_A_KEY_1|PORT_B_KEY_1|PORT_A_KEY_2|PORT_B_KEY_2)) {
       switch (cur_menu_item) {
         case 0:video_tests(); break;
-        case 1:audio_test(); break;
+        case 1:if (FMfeatures==SMS_AUDIO_NO_FM)
+                 PSG_audio_test();
+               else
+                 audio_tests_menu();
+               break;
         case 2:pad_tests(); break;
         case 3:sysinfo(); break;
         case 4:paddle_test(false); break;
