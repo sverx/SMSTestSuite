@@ -82,3 +82,14 @@ If "unidentified BIOS found!" is printed, please let us know here -> http://www.
 
 Also, pressing the DOWN key on the pad, the first 16 KB of the BIOS contents will be saved to SRAM, if your cartridge supports that (Krikzz's Master EverDrive's users will find a SAV file in their SD cards only after dumping the SRAM to SD, which happens when you load a new ROM to the cart).
 
+## Other Useful Tools
+
+You can check your console's system and video memory and even your cartridge internal memory using SMSmemtest
+
+* SMSmemtest: https://github.com/sverx/SMSmemtest
+
+You can also test your console's audio chips (YM2413 and SN76489) using these amazing JoppyFurr's TestRoms:
+
+* YM2413 TestRom for SMS: https://www.smspower.org/Homebrew/YM2413TestRom-SMS
+* SN76489 TestRom for SMS: https://www.smspower.org/Homebrew/SN76489TestRom-SMS
+
