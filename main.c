@@ -897,7 +897,8 @@ void fullscreen (void) {
     if (kp & (PORT_A_KEY_2|PORT_B_KEY_2))
       break;
     if (kp & (PORT_A_KEY_1|PORT_B_KEY_1)) {
-      which=(which+1)%4;
+      if (++which==4)
+        which=0;
       switch (which) {
         case 0:SMS_setBGPaletteColor (0, RGB(3,3,3)); break;
         case 1:SMS_setBGPaletteColor (0, RGB(3,0,0)); break;
