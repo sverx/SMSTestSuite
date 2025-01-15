@@ -9,8 +9,8 @@
 #define MIN(a,b)  (((a)<(b))?(a):(b))
 #define MAX(a,b)  (((a)>=(b))?(a):(b))
 
-#include <stdio.h>
-#include <stdbool.h>
+#include <stdio.h>         // NULL is defined here
+#include <stdbool.h>       // bool is defined here
 
 #define MD_PAD_SUPPORT
 #define VDPTYPE_DETECTION
@@ -18,6 +18,10 @@
 #include "../PSGlib/PSGlib.h"
 
 #include "bank1.h"
+
+const unsigned char version_string[] = {MAJOR_VER+'0', '.', (MINOR_VER/10)+'0', (MINOR_VER%10)+'0', '\0'};
+
+const unsigned char digits[] = {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
 
 #define MAIN_MENU_ITEMS 5
 const unsigned char * const main_menu[MAIN_MENU_ITEMS] =   {"Video Tests",
@@ -65,7 +69,7 @@ const struct {
 
   {0xdc4e,"Store Display Unit BIOS"},         // not sure this is really useful
 
-  {0x251c,"Emulicious (emulator) BIOS"}       // (accurate at 11 Nov 2024)
+  {0x251c,"Emulicious (emulator) BIOS"}       // (accurate at 15 Jan 2025)
 };
 
 #define GG_BIOSES_ITEMS 2
@@ -684,73 +688,78 @@ unsigned char detectVDPSpriteZoomCapabilities (void) {
 void draw_footer_and_ver (void) {
   // print console model
   SMS_setNextTileatXY(FOOTER_COL,FOOTER_ROW);
-  printf (" Model:");
+  SMS_print (" Model:");
   if (is_MegaDrive)
-        printf ("Genesis/MegaDrive      ");
+        SMS_print ("Genesis/MegaDrive      ");
   else if (do_Port3E_works) {
     if (has_new_VDP)
-        printf ("Master System II       ");
+        SMS_print ("Master System II       ");
     else
-        printf ("Master System          ");
+        SMS_print ("Master System          ");
   } else {                                     //   !do_Port3E_works
     if (has_new_VDP) {
       if (has_2ASIC_GG)
-        printf ("Game Gear (Twin ASICs) ");    // no port3E support, new VDP, Two ASICs
+        SMS_print ("Game Gear (Twin ASICs) ");    // no port3E support, new VDP, Two ASICs
       else
-        printf ("Game Gear (Single ASIC)");    // no port3E support, new VDP, One ASIC
+        SMS_print ("Game Gear (Single ASIC)");    // no port3E support, new VDP, One ASIC
     }
     else
-        printf ("Mark III               ");    // no port3E support, old VDP
+        SMS_print ("Mark III               ");    // no port3E support, old VDP
   }
 
   // print region
   SMS_setNextTileatXY(FOOTER_COL,FOOTER_ROW+1);
-  printf (" Region:");
+  SMS_print (" Region:");
   if (is_Japanese)
-    printf ("JPN/KOR");                 // Japanese/Korean
+    SMS_print ("JPN/KOR");                 // Japanese/Korean
   else if (TV_model & VDP_NTSC)
-    printf ("USA/BRA");                 // not Japanese and 60 Hz => USA/Brasil
+    SMS_print ("USA/BRA");                 // not Japanese and 60 Hz => USA/Brasil
   else if (TV_model & VDP_PAL)
-    printf ("EUR/AUS");                 // not Japanese and 50 Hz => EUR/Australia
+    SMS_print ("EUR/AUS");                 // not Japanese and 50 Hz => EUR/Australia
   //~ else
-    //~ printf ("- ??? -");                 // not Japanese and undetected TV (this shouldn't happen with current detection routine)
+    //~ SMS_print ("- ??? -");                 // not Japanese and undetected TV (this shouldn't happen with current detection routine)
 
   // print TV mode
-  printf (" TV:");
+  SMS_print (" TV:");
   if (TV_model & VDP_PAL)
-    printf ("50Hz (PAL) ");
+    SMS_print ("50Hz (PAL) ");
   else if (TV_model & VDP_NTSC)
-    printf ("60Hz (NTSC)");
+    SMS_print ("60Hz (NTSC)");
   //~ else
-    //~ printf ("undetected ");            // (this shouldn't happen with current detection routine)
+    //~ SMS_print ("undetected ");            // (this shouldn't happen with current detection routine)
 
   // print if paddle is detected
   if (some_paddle_connected) {
     SMS_setNextTileatXY(FOOTER_COL,FOOTER_ROW-1);
-    printf (" Paddle Control found in [%c]  ",(some_paddle_connected==0x01)?'1':'2');
+    SMS_print (" Paddle Control found in [");
+    SMS_print ((some_paddle_connected==0x01)?"1":"2");
+    SMS_print ("]  ");
   }
 
   // print if FM chip is detected
   if (FMfeatures!=SMS_AUDIO_NO_FM) {
     SMS_setNextTileatXY(FOOTER_COL+2,FOOTER_ROW-2);
-    printf (" FM audio chip detected! ");
+    SMS_print (" FM audio chip detected! ");
   }
 
   // print program version (just under the title)
   SMS_setNextTileatXY(3,4);
-  printf ("ver %d.%2d",MAJOR_VER,MINOR_VER);
+  SMS_print ("ver ");
+  SMS_print (version_string);
 }
 
 void draw_menu (unsigned char *menu[], unsigned int max) {
   unsigned char i;
   for (i=0;i<max;i++) {
     SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+i);
-    printf ("  %-16s",menu[i]);
+    SMS_print ("                  ");   // 18 spaces
+    SMS_setNextTileatXY(MENU_FIRST_COL+2,MENU_FIRST_ROW+i);  // same row, two to the right
+    SMS_print (menu[i]);
   }
   // make sure to cover the main menu text with submenu even if this has less options
   while (i<main_menu_items) {
     SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+i);
-    printf ("                  ");  // 18 spaces
+    SMS_print ("                  ");  // 18 spaces
     i++;
   }
 }
@@ -1230,6 +1239,16 @@ void prepare_and_show_main_menu (void) {
   draw_menu(main_menu, main_menu_items);
 }
 
+void print_hex (unsigned int value) {
+  SMS_setTile(digits[(value>>12)]-32);
+  value<<=4;
+  SMS_setTile(digits[(value>>12)]-32);
+  value<<=4;
+  SMS_setTile(digits[(value>>12)]-32);
+  value<<=4;
+  SMS_setTile(digits[(value>>12)]-32);
+}
+
 void sysinfo (void) {
   unsigned int bios_sum;
   unsigned char i=0;
@@ -1238,73 +1257,91 @@ void sysinfo (void) {
   SMS_copySpritestoSAT();
 
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW);
-  printf (" Hardware tests ");
+  SMS_print (" Hardware tests ");
 
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+1);
-  printf (" JPN?:%-3s     ",(is_Japanese?"Yes":"No"));
+  SMS_print (" JPN?:");
+  SMS_print (is_Japanese?"Yes":"No ");
+  SMS_print ("     ");
 
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+2);
-  printf (" VDP?:");
+  SMS_print (" VDP?:");
   if (is_MegaDrive)
-    printf ("315-5313");
+    SMS_print ("315-5313");
   else if (is_GameGear)
-    printf ("315-5378");
+    SMS_print ("315-5378");
   else if (has_new_VDP)
-    printf ("315-5246");
+    SMS_print ("315-5246");
   else
-    printf ("315-5124");
+    SMS_print ("315-5124");
 
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+3);
-  printf (" TV? :");
+  SMS_print (" TV? :");
   if (TV_model & VDP_NTSC)
-    printf ("60Hz (NTSC)");               // 60 Hz
+    SMS_print ("60Hz (NTSC)");               // 60 Hz
   else if (TV_model & VDP_PAL)
-    printf ("50Hz (PAL) ");               // 50 Hz
+    SMS_print ("50Hz (PAL) ");               // 50 Hz
   //~ else
-    //~ printf ("*???*      ");               // undetected TV (?)
+    //~ SMS_print ("*???*      ");               // undetected TV (?)
 
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+4);
-  printf (" MediaEnable?:%-3s ",(do_Port3E_works?"Yes":"No"));
+  SMS_print (" MediaEnable?:");
+  SMS_print (do_Port3E_works?"Yes":"No ");
+  SMS_print (" ");
 
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+5);
-  printf (" Z80 type?:%-4s   ",(has_CMOS_CPU?"CMOS":"NMOS"));
+  SMS_print (" Z80 type?:");
+  SMS_print (has_CMOS_CPU?"CMOS":"NMOS");
+  SMS_print ("   ");
 
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+6);
-  if (is_GameGear)
-    printf (" Twin ASIC?:%-3s   ",(has_2ASIC_GG?"Yes":"No"));
-  else
-    printf ("                  ");
+  if (is_GameGear) {
+    SMS_print (" Twin ASIC?:");
+    SMS_print (has_2ASIC_GG?"Yes":"No ");
+    SMS_print ("   ");
+  } else
+    SMS_print ("                  ");   // 18 spaces
 
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+7);
   if ((!is_MegaDrive) && (do_Port3E_works)) {   // if not MegaDrive and not GameGear and not Mark III
     bios_sum=get_BIOS_sum(BIOS_SIZE_8K);
-    printf (" BIOS sum: 0x%04X ",bios_sum);
+    SMS_print (" BIOS sum: 0x");
+    print_hex(bios_sum);
+    SMS_print (" ");
+
     SMS_setNextTileatXY(1,MENU_FIRST_ROW+9);
     while (i<BIOSES_ITEMS) {
       if (bios_sum==BIOSes[i].sum8k) {
-        printf ("%-30s",BIOSes[i].name);
+        SMS_print ("                              ");   // 30 spaces
+        SMS_setNextTileatXY(1,MENU_FIRST_ROW+9);
+        SMS_print (BIOSes[i].name);
         break;
       }
       i++;
     }
     if (i==BIOSES_ITEMS)
-      printf ("** unidentified BIOS found! **");
+      SMS_print ("** unidentified BIOS found! **");
   } else if (is_GameGear) {
     if (has_BIOS_GG) {
       bios_sum=get_BIOS_sum(BIOS_SIZE_1K);
-      printf (" BIOS sum: 0x%04X ",bios_sum);
+      SMS_print (" BIOS sum: 0x");
+      print_hex(bios_sum);
+      SMS_print (" ");
+
       SMS_setNextTileatXY(1,MENU_FIRST_ROW+9);
       while (i<GG_BIOSES_ITEMS) {
         if (bios_sum==GG_BIOSes[i].sum1k) {
-          printf ("%-30s",GG_BIOSes[i].name);
+          SMS_print ("                              ");   // 30 spaces
+          SMS_setNextTileatXY(1,MENU_FIRST_ROW+9);
+          SMS_print (GG_BIOSes[i].name);
           break;
         }
         i++;
       }
       if (i==GG_BIOSES_ITEMS)
-        printf ("** unidentified BIOS found! **");
+        SMS_print ("** unidentified BIOS found! **");
     } else {
-      printf (" No BIOS present  ");
+      SMS_print (" No BIOS present  ");
     }
   }
 
