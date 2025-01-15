@@ -652,16 +652,6 @@ wait_3_set:
 }
 #pragma restore
 
-/*
-unsigned char port0 (void) __naked {
-  __asm
-    in a,(#0)
-    ld l,a
-    ret
-  __endasm;
-}
-*/
-
 unsigned char detectVDPSpriteZoomCapabilities (void) {
   unsigned char i;
   SMS_VRAMmemset (0x0000, 0xFF, 32);         // a 'full' tile
@@ -757,18 +747,29 @@ void draw_menu (unsigned char *menu[], unsigned int max) {
     SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+i);
     printf ("  %-16s",menu[i]);
   }
+  // make sure to cover the main menu text with submenu even if this has less options
+  while (i<main_menu_items) {
+    SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+i);
+    printf ("                  ");  // 18 spaces
+    i++;
+  }
 }
 
 void load_menu_assets (void) {
+  // load font tiles
+  SMS_loadZX7compressedTiles (font_zx7,0);
   // load background tiles, map and palette
   SMS_loadPSGaidencompressedTiles (BG__tiles__psgcompr,96);
   SMS_loadSTMcompressedTileMap (0,0,BG__tilemap__stmcompr);
   SMS_loadBGPalette(BG__palette__bin);
-  // load sprite tile, build palette, turn on text renderer
+  // load sprite tile, build palette
   SMS_loadPSGaidencompressedTiles (arrow__tiles__psgcompr,256);
   SMS_setSpritePaletteColor (0, RGB(0,0,0));
   SMS_setSpritePaletteColor (1, RGB(3,3,3));
-  SMS_autoSetUpTextRenderer();
+  // turn on text renderer
+  SMS_configureTextRenderer(-32);
+  SMS_displayOn();
+  SMS_setNextTileatXY(0,0);
 }
 
 unsigned int filter_paddle(unsigned int value) {
@@ -1140,7 +1141,7 @@ void pad_tests (void) {
 
     // if there are no keys pressed or held or released in (approx.) 3 seconds, leave the test
     if ((((kp | kr | mp | mr) & ~CARTRIDGE_SLOT)==0) && ((filter_paddle(SMS_getKeysHeld()) & ~CARTRIDGE_SLOT)==0) && (SMS_getMDKeysHeld()==0)) {
-      if (++stay_cnt>APPROX_3_SECS)
+      if (++stay_cnt>=APPROX_3_SECS)
         should_stay=false;
     } else
       stay_cnt=0;
@@ -1210,13 +1211,14 @@ void paddle_test (bool stay_forever) {
       SMS_setBGPaletteColor(COLOR_PADDLE_B,BLACK);
 
     // if no action for 3 seconds, leave
-    if (++stay_cnt>APPROX_3_SECS)
+    if (++stay_cnt>=APPROX_3_SECS)
       should_stay=false;
 
     // if PAUSE pressed, leave
-    if (SMS_queryPauseRequested())
-      SMS_resetPauseRequest(), should_stay=false;
-
+    if (SMS_queryPauseRequested()) {
+      SMS_resetPauseRequest();
+      should_stay=false;
+    }
   }
 }
 
@@ -1344,36 +1346,9 @@ cmos:
   __endasm;
 }
 
-// from MBMlib:
-unsigned char SMS_GetFMAudioCapabilities (void) __naked {
+// originally from MBMlib:
+unsigned char SMS_GetFMAudioCapabilities (void) __naked __z88dk_fastcall {
   __asm
-
-    ; first we need to perform region detection
-    ; as devkitSMS currently does NOT support that :|
-
-    ld a, #0b11110101               ; Output 1s on both TH lines
-    out (#0x3f), a
-    in a, (#0xdd)
-    and #0b11000000                 ; See what the TH inputs are
-    cp #0b11000000                  ; If the input does not match the output then it is a Japanese system
-    jp nz, _IsJapanese
-
-    ld a, #0b01010101               ; Output 0s on both TH lines
-    out (#0x3f), a
-    in a, (#0xdd)
-    and #0b11000000                 ; See what the TH inputs are
-    jp nz, _IsJapanese              ; If the input does not match the output then it is a Japanese system
-
-    ld a, #0b11111111               ; Set everything back to being inputs
-    out (#0x3f), a
-
-    ld e, #1                        ; store export = 1 in E
-    jr _getAudioCap
-
-_IsJapanese:
-    ld e, #0                        ; store export = 0 in E
-
-_getAudioCap:
     ld a, (_SMS_Port3EBIOSvalue)
     or #0x04                        ; disable I/O chip
     out (#0x3E), a
@@ -1402,30 +1377,33 @@ _noinc:
     srl c                           ; 4 --> 2; 3, 2 --> 1; 0, 1 --> 0
     ld a, c
     bit 0, c                        ; check if PSG+FM (Japanese SMS) or PSG only
-    ret z                           ; yes? then transfer value directly
+    jr z,_done                      ; yes? then transfer value directly
 
-    add a,e                         ; else check region: if Region = 1 (Export)
-                                    ; then 1 --> 2 (3rd party FM board);
-                                    ; else 1 stays 1 unchanged (Mark III + FM unit)
+    ld e,a                          ; else check region: if Region = 1 (Export)
+    ld a,(_is_Japanese)             ; then 1 --> 2 (3rd party FM board);
+    xor #0x01                       ; else 1 stays 1 unchanged (Mark III + FM unit)
+    add a,e
+
 _done:
-    ret                             ; return FM type
+    ld l,a                          ; return FM type
+    ret
   __endasm;
 }
 
 #pragma save
 #pragma disable_warning 85
-void SMS_EnableAudio (unsigned char chips) __z88dk_fastcall __naked {
+void SMS_EnableAudio (unsigned char chips) __naked __z88dk_fastcall {
   __asm
-  ld a, (_SMS_Port3EBIOSvalue)
-  or #0x04                        ; disable I/O chip
-  out (#0x3E), a
+    ld a, (_SMS_Port3EBIOSvalue)
+    or #0x04                        ; disable I/O chip
+    out (#0x3E), a
 
-  ld a, l
-  out (#0xF2), a                  ; output to the audio control port
+    ld a, l
+    out (#0xF2), a                  ; output to the audio control port
 
-  ld a, (_SMS_Port3EBIOSvalue)
-  out (#0x3E), a                  ; turn I/O chip back on
-  ret
+    ld a, (_SMS_Port3EBIOSvalue)
+    out (#0x3E), a                  ; turn I/O chip back on
+    ret
   __endasm;
 }
 #pragma restore
