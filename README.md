@@ -60,6 +60,8 @@ There are actually deinterlacers out there which can display the drop shadows co
 * press 1/START to test volume clipping. If the sound volume appears to do not change it means it's clipping, which is very common on a SEGA Master System, uncommon on a SEGA MegaDrive/Genesis.
 * press 2 to exit
 
+If an FM unit is attached, or an FM chip is present inside the console, then the Audio Test Menu will appear. The PSG chip audio test is described above, the FM chip audio test instead will play a short looping tune using the FM chip. Finally, the combined audio test will play a tune on both the audio chips at the same time, which is possibile only on some systems.
+
 ### Pad Tests
 
 You can test your SEGA Master System and SEGA MegaDrive/Genesis (*port A only*) pads, your console PAUSE and RESET keys, and your console ports too. If no key is pressed/held/released in approx 3 seconds, the test will end.

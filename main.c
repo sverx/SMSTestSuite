@@ -4,7 +4,7 @@
 ************************************************************************ */
 
 #define MAJOR_VER 0
-#define MINOR_VER 35
+#define MINOR_VER 36
 
 #define MIN(a,b)  (((a)<(b))?(a):(b))
 #define MAX(a,b)  (((a)>=(b))?(a):(b))
@@ -16,12 +16,17 @@
 #define VDPTYPE_DETECTION
 #include "../SMSlib/SMSlib.h"
 #include "../PSGlib/PSGlib.h"
+//~ #include "../MBMlib/MBMlib.h"
+
+// use Banjo for FM audio
+#include "../banjo_lib_minimal/banjo.h"
+extern song_data_t const sn_opll_loop;
+channel_t song_channels[CHAN_COUNT_SN + CHAN_COUNT_OPLL_DRUMS];
+channel_t *song_channel_ptrs[CHAN_COUNT_SN + CHAN_COUNT_OPLL_DRUMS];
 
 #include "bank1.h"
 
 const unsigned char version_string[] = {MAJOR_VER+'0', '.', (MINOR_VER/10)+'0', (MINOR_VER%10)+'0', '\0'};
-
-const unsigned char digits[] = {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
 
 #define MAIN_MENU_ITEMS 5
 const unsigned char * const main_menu[MAIN_MENU_ITEMS] =   {"Video Tests",
@@ -71,6 +76,14 @@ const struct {
 
   {0x251c,"Emulicious (emulator) BIOS"}       // (accurate at 15 Jan 2025)
 };
+
+
+#define TEXT_RENDERED_ASCII_TO_TILE   -32
+const unsigned char hex_digits_tiles[] = {
+  '0'+TEXT_RENDERED_ASCII_TO_TILE, '1'+TEXT_RENDERED_ASCII_TO_TILE, '2'+TEXT_RENDERED_ASCII_TO_TILE, '3'+TEXT_RENDERED_ASCII_TO_TILE,
+  '4'+TEXT_RENDERED_ASCII_TO_TILE, '5'+TEXT_RENDERED_ASCII_TO_TILE, '6'+TEXT_RENDERED_ASCII_TO_TILE, '7'+TEXT_RENDERED_ASCII_TO_TILE,
+  '8'+TEXT_RENDERED_ASCII_TO_TILE, '9'+TEXT_RENDERED_ASCII_TO_TILE, 'A'+TEXT_RENDERED_ASCII_TO_TILE, 'B'+TEXT_RENDERED_ASCII_TO_TILE,
+  'C'+TEXT_RENDERED_ASCII_TO_TILE, 'D'+TEXT_RENDERED_ASCII_TO_TILE, 'E'+TEXT_RENDERED_ASCII_TO_TILE, 'F'+TEXT_RENDERED_ASCII_TO_TILE};
 
 #define GG_BIOSES_ITEMS 2
 const struct {
@@ -173,16 +186,15 @@ unsigned char temp_buf[TEMP_BUF_SIZE];
 unsigned long ram_buffer[VRAM_XFER_LENGTH_DWORDS];
 
 /*  ******** for FM audio chip detection *************  */
+//~ // possible detection results are:
+//~ #define SMS_AUDIO_NO_FM    0
+//~ #define SMS_AUDIO_FM_ONLY  1
+//~ #define SMS_AUDIO_FM_PSG   2
 
-// possible detection results are:
-#define SMS_AUDIO_NO_FM    0
-#define SMS_AUDIO_FM_ONLY  1
-#define SMS_AUDIO_FM_PSG   2
-
-#define SMS_ENABLE_AUDIO_FM_ONLY   0x01
-#define SMS_ENABLE_AUDIO_FM_PSG    0x03
-#define SMS_ENABLE_AUDIO_PSG_ONLY  0x00
-#define SMS_ENABLE_AUDIO_NONE      0x02
+//~ #define SMS_ENABLE_AUDIO_FM_ONLY   0x01
+//~ #define SMS_ENABLE_AUDIO_FM_PSG    0x03
+//~ #define SMS_ENABLE_AUDIO_PSG_ONLY  0x00
+//~ #define SMS_ENABLE_AUDIO_NONE      0x02
 
 /*  **************** [[[ CODE ]]] ************************** */
 
@@ -737,7 +749,8 @@ void draw_footer_and_ver (void) {
   }
 
   // print if FM chip is detected
-  if (FMfeatures!=SMS_AUDIO_NO_FM) {
+  //~ if (FMfeatures!=SMS_AUDIO_NO_FM) {
+  if (FMfeatures!=0) {
     SMS_setNextTileatXY(FOOTER_COL+2,FOOTER_ROW-2);
     SMS_print (" FM audio chip detected! ");
   }
@@ -776,7 +789,7 @@ void load_menu_assets (void) {
   SMS_setSpritePaletteColor (0, RGB(0,0,0));
   SMS_setSpritePaletteColor (1, RGB(3,3,3));
   // turn on text renderer
-  SMS_configureTextRenderer(-32);
+  SMS_configureTextRenderer(TEXT_RENDERED_ASCII_TO_TILE);
   SMS_displayOn();
   SMS_setNextTileatXY(0,0);
 }
@@ -978,6 +991,66 @@ void video_tests (void) {
   cur_menu_item=0,pointer_anim=0;
 }
 
+void FM_audio_test (bool combined_audio) {
+  SMS_displayOff();
+  SMS_initSprites();
+  SMS_copySpritestoSAT();
+  SMS_VRAMmemset (XYtoADDR(0,0), 0x00, 32*28*2);   // full map of 'empty' tiles
+
+  SMS_setNextTileatXY(2,4);
+  if (!combined_audio)
+    SMS_print ("A tune using the FM chip      ""  should be playing.");
+  else {
+    SMS_print ("A tune using both the FM chip ""  and the PSG chip should be    ""  playing.");
+    SMS_setNextTileatXY(2,8);
+    SMS_print ("This should work on a JP/KR   ""  Master System but the PSG     ""  chip should be muted on a     ""  Mark III w/ an FM sound unit.");
+  }
+
+  SMS_setNextTileatXY(2,14);
+    SMS_print ("Press <2> to leave");
+
+
+  //~ SMS_EnableAudio(SMS_ENABLE_AUDIO_FM_ONLY);
+  //~ MBMPlay(example_mbm);  // BETA example song
+
+  banjo_init(CHAN_COUNT_SN+CHAN_COUNT_OPLL_DRUMS, (BANJO_HAS_OPLL|BANJO_HAS_SN));  // enable FM chip
+  banjo_play_song(&sn_opll_loop);
+  if (!combined_audio) {
+    banjo_mute_song_channel(0);
+    banjo_mute_song_channel(1);
+    banjo_mute_song_channel(2);
+    banjo_mute_song_channel(3);
+  }
+
+  SMS_displayOn();
+
+  for(;;) {
+    SMS_waitForVBlank();
+    //~ MBMFrame();
+    banjo_update_song();
+
+    kp=filter_paddle(SMS_getKeysPressed());
+    //~ if (kp & (PORT_A_KEY_UP|PORT_B_KEY_UP))
+      //~ PSGPlay(CH0_psgc);
+    //~ if (kp & (PORT_A_KEY_RIGHT|PORT_B_KEY_RIGHT))
+      //~ PSGPlay(CH1_psgc);
+    //~ if (kp & (PORT_A_KEY_DOWN|PORT_B_KEY_DOWN))
+      //~ PSGPlay(CH2_psgc);
+    //~ if (kp & (PORT_A_KEY_LEFT|PORT_B_KEY_LEFT))
+      //~ PSGPlay(CH3_psgc);
+    //~ if (kp & (PORT_A_KEY_1|PORT_B_KEY_1))
+      //~ PSGPlay(VolumeTest_psgc);
+    if (kp & (PORT_A_KEY_2|PORT_B_KEY_2)) {
+      banjo_song_stop();
+      break;
+    }
+  }
+  //~ MBMStop();
+  //~ SMS_EnableAudio(SMS_ENABLE_AUDIO_PSG_ONLY);
+
+  banjo_init(CHAN_COUNT_SN, BANJO_HAS_SN);    // disable FM chip
+}
+
 void PSG_audio_test (void) {
   SMS_displayOff();
   SMS_initSprites();
@@ -1040,8 +1113,8 @@ void audio_tests_menu(void) {
     if (kp & (PORT_A_KEY_1|PORT_A_KEY_2|PORT_B_KEY_1|PORT_B_KEY_2)) {
       switch (cur_menu_item) {
         case 0: PSG_audio_test(); go_back=true; break;
-        case 1: /* FM_audio_test(); */ break;
-        case 2: /* combined_audio_test(); */ break;
+        case 1: FM_audio_test(false); go_back=true; break;
+        case 2: FM_audio_test(true); go_back=true; break;
         case AUDIO_MENU_ITEMS-1:go_back=true; break;
       }
       if (!go_back) {
@@ -1240,13 +1313,18 @@ void prepare_and_show_main_menu (void) {
 }
 
 void print_hex (unsigned int value) {
-  SMS_setTile(digits[(value>>12)]-32);
+  unsigned char c;
+  c=hex_digits_tiles[(value>>12)];
+  SMS_setTile(c);
   value<<=4;
-  SMS_setTile(digits[(value>>12)]-32);
+  c=hex_digits_tiles[(value>>12)];
+  SMS_setTile(c);
   value<<=4;
-  SMS_setTile(digits[(value>>12)]-32);
+  c=hex_digits_tiles[(value>>12)];
+  SMS_setTile(c);
   value<<=4;
-  SMS_setTile(digits[(value>>12)]-32);
+  c=hex_digits_tiles[(value>>12)];
+  SMS_setTile(c);
 }
 
 void sysinfo (void) {
@@ -1384,6 +1462,7 @@ cmos:
   __endasm;
 }
 
+/*
 // originally from MBMlib:
 unsigned char SMS_GetFMAudioCapabilities (void) __naked __z88dk_fastcall {
   __asm
@@ -1445,13 +1524,16 @@ void SMS_EnableAudio (unsigned char chips) __naked __z88dk_fastcall {
   __endasm;
 }
 #pragma restore
+*/
 
 void main (void) {
   // detect region
   is_Japanese=isJapanese();
 
   // detect FM capabilities
-  FMfeatures=SMS_GetFMAudioCapabilities();
+  //~ FMfeatures=SMS_GetFMAudioCapabilities();
+  banjo_check_hardware();
+  FMfeatures=((banjo_has_chips & BANJO_HAS_OPLL)?1:0);  // 1=FM present, 0=FM absent
 
   // detect if Port3E features are present
   do_Port3E_works=is_Port3E_effective(0xFFE0);   // OR 0xE0 (set bits 5,6,7 to disable card/cartridge/expansion), AND 0xFF (don't enable anything else)
@@ -1521,7 +1603,8 @@ void main (void) {
     if (kp & (PORT_A_KEY_1|PORT_B_KEY_1|PORT_A_KEY_2|PORT_B_KEY_2)) {
       switch (cur_menu_item) {
         case 0:video_tests(); break;
-        case 1:if (FMfeatures==SMS_AUDIO_NO_FM)
+        case 1:// if (FMfeatures==SMS_AUDIO_NO_FM)
+               if (FMfeatures==0)
                  PSG_audio_test();
                else
                  audio_tests_menu();
