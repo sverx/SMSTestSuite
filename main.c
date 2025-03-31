@@ -4,7 +4,7 @@
 ************************************************************************ */
 
 #define MAJOR_VER 0
-#define MINOR_VER 36
+#define MINOR_VER 37
 
 #define MIN(a,b)  (((a)<(b))?(a):(b))
 #define MAX(a,b)  (((a)>=(b))?(a):(b))
@@ -728,8 +728,8 @@ void draw_footer_and_ver (void) {
     SMS_print ("USA/BRA");                 // not Japanese and 60 Hz => USA/Brasil
   else if (TV_model & VDP_PAL)
     SMS_print ("EUR/AUS");                 // not Japanese and 50 Hz => EUR/Australia
-  //~ else
-    //~ SMS_print ("- ??? -");                 // not Japanese and undetected TV (this shouldn't happen with current detection routine)
+  else
+    SMS_print ("- ??? -");                 // not Japanese and undetected TV
 
   // print TV mode
   SMS_print (" TV:");
@@ -737,8 +737,8 @@ void draw_footer_and_ver (void) {
     SMS_print ("50Hz (PAL) ");
   else if (TV_model & VDP_NTSC)
     SMS_print ("60Hz (NTSC)");
-  //~ else
-    //~ SMS_print ("undetected ");            // (this shouldn't happen with current detection routine)
+  else
+    SMS_print ("- unknown -");
 
   // print if paddle is detected
   if (some_paddle_connected) {
