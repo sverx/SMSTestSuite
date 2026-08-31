@@ -4,7 +4,7 @@
 ************************************************************************ */
 
 #define MAJOR_VER 0
-#define MINOR_VER 37
+#define MINOR_VER 38
 
 #define MIN(a,b)  (((a)<(b))?(a):(b))
 #define MAX(a,b)  (((a)>=(b))?(a):(b))
@@ -90,7 +90,7 @@ const struct {
   const unsigned int sum1k;
   const unsigned char * const name;
 } GG_BIOSes[GG_BIOSES_ITEMS] = {
-  {0x5e3a,"Majesco GameGear BIOS"},
+  {0x5e3a,"TMSS GameGear BIOS"},
   {0x207e,"Emulicious (emulator) GG BIOS"}    //  ;)
 };
 
@@ -142,7 +142,7 @@ unsigned char some_paddle_connected;
 #define COLOR_PADDLE_A_1     2
 #define COLOR_PADDLE_B_1     11
 
-#define PADDLE_THRESHOLD     8
+#define PADDLE_THRESHOLD     3
 
 #define APPROX_1_SEC     55
 #define APPROX_3_SECS    (APPROX_1_SEC*3)
@@ -729,16 +729,18 @@ void draw_footer_and_ver (void) {
   else if (TV_model & VDP_PAL)
     SMS_print ("EUR/AUS");                 // not Japanese and 50 Hz => EUR/Australia
   else
-    SMS_print ("- ??? -");                 // not Japanese and undetected TV
+    SMS_print ("- ??? -");                 // not Japanese and undetected TV frame rate
+
+  SMS_print ("       ");         // 7 chars empty space (filler)
 
   // print TV mode
   SMS_print (" TV:");
   if (TV_model & VDP_PAL)
-    SMS_print ("50Hz (PAL) ");
+    SMS_print ("50Hz");
   else if (TV_model & VDP_NTSC)
-    SMS_print ("60Hz (NTSC)");
+    SMS_print ("60Hz");
   else
-    SMS_print ("- unknown -");
+    SMS_print ("?   ");                    // undetected TV frame rate
 
   // print if paddle is detected
   if (some_paddle_connected) {
@@ -1245,6 +1247,8 @@ void paddle_test (bool stay_forever) {
   for (i=0;i<15;i++)
     SMS_setBGPaletteColor(i,0x00);    // black
   SMS_setBGPaletteColor(15,0x3f);     // white
+  SMS_setSpritePaletteColor(0,0x00);  // black
+  SMS_setSpritePaletteColor(1,0x3f);  // white
 
   SMS_resetPauseRequest();            // there might be a previous pending request
   SMS_displayOn();
@@ -1356,11 +1360,11 @@ void sysinfo (void) {
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+3);
   SMS_print (" TV? :");
   if (TV_model & VDP_NTSC)
-    SMS_print ("60Hz (NTSC)");               // 60 Hz
+    SMS_print ("60Hz       ");               // 60 Hz
   else if (TV_model & VDP_PAL)
-    SMS_print ("50Hz (PAL) ");               // 50 Hz
-  //~ else
-    //~ SMS_print ("*???*      ");               // undetected TV (?)
+    SMS_print ("50Hz       ");               // 50 Hz
+  else
+    SMS_print ("undetected ");               // undetected TV
 
   SMS_setNextTileatXY(MENU_FIRST_COL,MENU_FIRST_ROW+4);
   SMS_print (" MediaEnable?:");
@@ -1462,6 +1466,14 @@ cmos:
   __endasm;
 }
 
+void ensure_BIOS_value_sanity (void) {
+  unsigned char slot = SMS_Port3EBIOSvalue & 0xE0;       // check uppermost 3 bits (the expansion port, the cartridge port and the card port)
+  if ((slot!=0x60) && (slot!=0xA0) && (slot!=0xC0))      // make sure only 1 at most is reset (pick cartridge as the safest option if this fails)
+    SMS_Port3EBIOSvalue = 0xA0;
+  SMS_Port3EBIOSvalue &= ~0x14;                          // ensure RAM and the IO chip are enabled (bits 4 and 2 are reset)
+  SMS_Port3EBIOSvalue |= 0x0B;                           // ensure BIOS is disabled (bit 3 set IMPORTANT!) and bits 1 and 0 are set (likely useless)
+}
+
 /*
 // originally from MBMlib:
 unsigned char SMS_GetFMAudioCapabilities (void) __naked __z88dk_fastcall {
@@ -1527,6 +1539,9 @@ void SMS_EnableAudio (unsigned char chips) __naked __z88dk_fastcall {
 */
 
 void main (void) {
+
+  ensure_BIOS_value_sanity();
+
   // detect region
   is_Japanese=isJapanese();
 
